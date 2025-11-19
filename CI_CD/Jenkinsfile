@@ -2,7 +2,6 @@ pipeline {
   agent any
 
   environment {
-  
     DOCKERHUB = credentials('dockerhub-credentials')
   }
 
@@ -14,6 +13,11 @@ pipeline {
     }
 
     stage('Lint: Frontend') {
+      agent {
+        docker {
+          image 'node:22-alpine'     // or node:20-alpine / node:18-alpine if you prefer
+        }
+      }
       steps {
         dir('frontend') {
           sh 'npm ci'
@@ -22,14 +26,14 @@ pipeline {
       }
     }
 
-stage('Lint: Backend') {
-  steps {
-    dir('backend') {
-      sh 'python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt ruff black'
-      sh '. .venv/bin/activate && ruff check app && black --check app'
+    stage('Lint: Backend') {
+      steps {
+        dir('backend') {
+          sh 'python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt ruff black'
+          sh '. .venv/bin/activate && ruff check app && black --check app'
+        }
+      }
     }
-  }
-}
 
     stage('Unit Tests (optional)') {
       steps {
