@@ -22,14 +22,14 @@ pipeline {
       }
     }
 
-    stage('Lint: Backend') {
-      steps {
-        dir('backend') {
-          sh 'python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt ruff black'
-          sh '. .venv/bin/activate && ruff check app && black --check app'
-        }
-      }
+stage('Lint: Backend') {
+  steps {
+    dir('backend') {
+      sh 'python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt ruff black'
+      sh '. .venv/bin/activate && ruff check app && black --check app'
     }
+  }
+}
 
     stage('Unit Tests (optional)') {
       steps {
