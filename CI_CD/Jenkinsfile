@@ -13,15 +13,16 @@ pipeline {
     }
 
     stage('Lint: Frontend') {
-      agent {
-        docker {
-          image 'node:22-alpine'     // or node:20-alpine / node:18-alpine if you prefer
-        }
-      }
       steps {
         dir('frontend') {
-          sh 'npm ci'
-          sh 'npx eslint .'
+          // Run lint inside a Node container manually
+          sh '''
+            docker run --rm \
+              -v "$PWD":/app \
+              -w /app \
+              node:22-alpine \
+              sh -c "npm ci && npx eslint ."
+          '''
         }
       }
     }
@@ -43,7 +44,6 @@ pipeline {
 
     stage('Build Docker Images') {
       steps {
-        // DOCKERHUB_USR comes from the credentials() binding above
         sh 'docker build -t ${DOCKERHUB_USR}/puzzle-frontend:latest ./frontend'
         sh 'docker build -t ${DOCKERHUB_USR}/puzzle-backend:latest ./backend'
       }
@@ -51,17 +51,10 @@ pipeline {
 
     stage('Push Images') {
       steps {
-        // DOCKERHUB_PSW also comes from the same credentials() binding
         sh 'echo ${DOCKERHUB_PSW} | docker login -u ${DOCKERHUB_USR} --password-stdin'
         sh 'docker push ${DOCKERHUB_USR}/puzzle-frontend:latest'
         sh 'docker push ${DOCKERHUB_USR}/puzzle-backend:latest'
       }
     }
   }
-
-  // post {
-  //   always {
-  //     cleanWs()
-  //   }
-  // }
 }
