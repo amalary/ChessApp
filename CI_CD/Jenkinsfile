@@ -56,3 +56,4 @@ stage('Lint: Frontend') {
     }
   }
 }
+
