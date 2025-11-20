@@ -15,10 +15,20 @@ pipeline {
 stage('Lint: Frontend') {
   steps {
     dir('frontend') {
-      sh 'docker run --rm -v /var/jenkins_home/workspace/ChessApp/frontend:/app -w /app node:22-alpine sh -c "npm install && npx eslint ."'
+      sh '''
+        echo "Running in $PWD"
+        ls -la
+
+        docker run --rm \
+          -v "$PWD":/app \
+          -w /app \
+          node:22-alpine \
+          sh -c "npm install && npx eslint ."
+      '''
     }
   }
 }
+
     stage('Lint: Backend') {
       steps {
         dir('backend') {
