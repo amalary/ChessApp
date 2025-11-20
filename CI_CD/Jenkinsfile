@@ -14,20 +14,20 @@ pipeline {
 
 stage('Lint: Frontend') {
   steps {
-    dir('frontend') {
-      sh '''
-        echo "Running in $PWD"
-        ls -la
+    sh '''
+      echo "Listing frontend dir from Jenkins container:"
+      ls -la frontend
 
-        docker run --rm \
-          -v "$PWD":/app \
-          -w /app \
-          node:22-alpine \
-          sh -c "npm install && npx eslint ."
-      '''
-    }
+      echo "Running npm install + eslint inside node:22-alpine using jenkins_home volume..."
+      docker run --rm \
+        -v jenkins_home:/jenkins_home \
+        -w /jenkins_home/workspace/ChessApp/frontend \
+        node:22-alpine \
+        sh -c "ls -la && npm install && npx eslint ."
+    '''
   }
 }
+
 
     stage('Lint: Backend') {
       steps {
