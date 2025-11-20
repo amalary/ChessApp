@@ -12,21 +12,19 @@ pipeline {
       }
     }
 
-    stage('Lint: Frontend') {
-      steps {
-        dir('frontend') {
-          // Run lint inside a Node container manually
-          sh '''
-            docker run --rm \
-              -v "$PWD":/app \
-              -w /app \
-              node:22-alpine \
-              sh -c "npm ci && npx eslint ."
-          '''
-        }
-      }
+stage('Lint: Frontend') {
+  steps {
+    dir('frontend') {
+      sh '''
+        docker run --rm \
+          -v "$PWD":/app \
+          -w /app \
+          node:22-alpine \
+          sh -c "npm ci && npx eslint ."
+      '''
     }
-
+  }
+}
     stage('Lint: Backend') {
       steps {
         dir('backend') {
