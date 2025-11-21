@@ -1,12 +1,7 @@
 from fastapi import FastAPI, UploadFile, File
-from ChessApp.routers import health  # we'll fix this line in a second
+from ChessApp.routers import health  
 
 app = FastAPI()
-
-# TEMP: comment out the router line if it's breaking things,
-# or fix the import to use ChessApp.routers if needed.
-
-# app.include_router(health.router)
 
 @app.get("/")
 async def root():
