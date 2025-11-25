@@ -1,0 +1,6 @@
+# Local secrets and service-account files
+.env
+sa.json
+keys/
+backend/sa.json
+backend/keys/
