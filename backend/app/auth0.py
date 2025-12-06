@@ -1,9 +1,7 @@
 # backend/app/auth0.py
 import os
-from functools import lru_cache
 from typing import Dict, Any
 
-import httpx
 import jwt
 from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, status
