@@ -3,13 +3,13 @@ from fastapi import FastAPI, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import health
-from app.auth0 import get_current_user   # 👈 Auth0 dependency
+from app.auth0 import get_current_user  # 👈 Auth0 dependency
 
 
 app = FastAPI()
 
 origins = [
-     "http://localhost:3000",
+    "http://localhost:3000",
     "http://localhost:3001",
 ]
 
