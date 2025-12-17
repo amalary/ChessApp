@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { AuthNav } from "components/AuthNav";
+import { AuthNav } from "@/components/AuthNav";
 import { getAccessTokenClient } from "lib/getAccessTokenClient";
 
 const BACKEND_URL =
