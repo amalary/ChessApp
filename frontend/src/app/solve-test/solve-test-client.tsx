@@ -17,9 +17,7 @@ function extractSolutionLines(data: SolveResponse): string[] {
     if ('solution' in data) {
       const sol = (data as { solution?: unknown }).solution;
       if (typeof sol === 'string') return [sol];
-      if (Array.isArray(sol)) {
-        return sol.filter((m): m is string => typeof m === 'string');
-      }
+      if (Array.isArray(sol)) return sol.filter((m): m is string => typeof m === 'string');
     }
 
     if ('detail' in data && typeof (data as { detail?: unknown }).detail === 'string') {
@@ -50,7 +48,6 @@ export default function SolveTestClient() {
 
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
-
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
@@ -124,24 +121,35 @@ export default function SolveTestClient() {
     }
   };
 
+  // Neumorphic “press” effect (works on click / active)
+  const pressable =
+    'transition-all duration-150 ease-out select-none ' +
+    'shadow-[10px_10px_20px_rgba(0,0,0,0.12),-10px_-10px_20px_rgba(255,255,255,0.75)] ' +
+    'active:translate-y-[1px] ' +
+    'active:shadow-[inset_8px_8px_16px_rgba(0,0,0,0.12),inset_-8px_-8px_16px_rgba(255,255,255,0.75)] ' +
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10';
+
   return (
     <main className="min-h-screen flex items-center justify-center p-6">
       <div className="w-full max-w-[520px]">
-        <div className="flex justify-end mb-4">
-          <button
-            type="button"
-            onClick={() => setTheme(isDark ? 'light' : 'dark')}
-            className="neumo-pill px-4 py-2 text-sm select-none"
-            aria-label="Toggle theme"
-          >
-            {isDark ? 'Dark' : 'Light'}
-          </button>
-        </div>
+        {/* Theme toggle moved INSIDE the main container (top-right) */}
+        <div className="neumo-surface p-8 md:p-10 relative">
+          <div className="absolute top-4 right-4">
+            <button
+              type="button"
+              onClick={() => setTheme(isDark ? 'light' : 'dark')}
+              className={`neumo-pill px-4 py-2 text-sm ${pressable}`}
+              aria-label="Toggle theme"
+            >
+              {isDark ? 'Dark' : 'Light'}
+            </button>
+          </div>
 
-        <div className="neumo-surface p-8 md:p-10">
           <form onSubmit={handleSubmit}>
             <div className="flex justify-center">
-              <label className="neumo-pill px-8 py-4 cursor-pointer text-lg font-medium tracking-tight">
+              <label
+                className={`neumo-pill px-8 py-4 cursor-pointer text-lg font-medium tracking-tight ${pressable}`}
+              >
                 Upload Image
                 <input type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
               </label>
@@ -162,11 +170,12 @@ export default function SolveTestClient() {
                 </div>
               </div>
             </div>
+
             <div className="mt-8 flex justify-center">
               <button
                 type="submit"
                 disabled={loading || !file}
-                className="neumo-pill px-8 py-3 text-base font-medium disabled:opacity-60"
+                className={`neumo-pill px-8 py-3 text-base font-medium disabled:opacity-60 disabled:active:translate-y-0 ${pressable}`}
               >
                 {loading ? 'Sending...' : 'Send to /solve'}
               </button>

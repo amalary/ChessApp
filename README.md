@@ -43,3 +43,8 @@
 |  - Lints/tests backend    |
 |  - Pushes to registry     |
 +---------------------------+
+
+To run the frontend 'npm run dev' in the front end directory 
+To run the backend 'uvicorn app.main:app --reload --env-file ../.env' in the backend directory using a command prompt in CLI 
+Long in page test rout " http://localhost:3001/login-test " 
+App test page route " http://localhost:3001/solve-test " 

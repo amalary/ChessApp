@@ -4,3 +4,5 @@ sa.json
 keys/
 backend/sa.json
 backend/keys/
+backend/tools/
+**/__pycache__/
