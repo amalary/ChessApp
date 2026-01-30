@@ -6,3 +6,8 @@ backend/sa.json
 backend/keys/
 backend/tools/
 **/__pycache__/
+GOOGLE_APPLICATION_CREDENTIALS=/app/keys/sa.json
+GCS_BUCKET=your-bucket-name-here
+GCP_PROJECT_ID=chessapp-477519
+chessapp-477519-f3f4cd22fc7e.json
+cloud-sql-proxy*.exe
