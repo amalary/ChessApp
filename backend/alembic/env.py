@@ -1,4 +1,6 @@
 import os
+import sys
+from pathlib import Path
 from urllib.parse import quote_plus
 
 from logging.config import fileConfig
@@ -17,11 +19,14 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+# Ensure the project root is importable when running from backend/.
+project_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(project_root))
+
+from ChessApp.app.db.base import Base  # noqa: E402
+from ChessApp.app.db import models  # noqa: F401,E402
+
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

@@ -1,8 +1,13 @@
 # backend/app/main.py
-from fastapi import FastAPI, UploadFile, File, Depends
+import os
+
+import chess
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
 from app.routers import health
-from app.auth0 import get_current_user  # 👈 Auth0 dependency 
+from app.services.gemini_fen import fen_from_image_bytes
+from app.services.mate_solver import find_mate_in_1_to_3
 
 
 app = FastAPI()
@@ -29,16 +34,50 @@ async def root():
     return {"message": "Backend is running"}
 
 
-# 👇 Protected by Auth0 – must send a valid Bearer token
+# Temporarily open for testing without Auth0
 @app.post("/solve")
 async def solve(
     image: UploadFile = File(...),
-    user: dict = Depends(get_current_user),
 ):
-    return {
-        "solution": "Qh7#",  # stub for now
-        "user": {
-            "sub": user.get("sub"),
-            "email": user.get("email"),
-        },
-    }
+    try:
+        image_bytes = await image.read()
+
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="No image uploaded")
+
+        # 1) Gemini Vision -> FEN
+        gemini_result = fen_from_image_bytes(image_bytes, image.filename)
+        fen = gemini_result["fen"]
+        confidence = gemini_result["confidence"]
+
+        # 2) Validate FEN
+        try:
+            board = chess.Board(fen)
+        except Exception:
+            raise HTTPException(status_code=422, detail="Invalid FEN returned from Gemini")
+
+        if not board.is_valid():
+            raise HTTPException(status_code=422, detail="Invalid chess position detected")
+
+        # 3) Run Stockfish
+        stockfish_path = os.environ.get("STOCKFISH_PATH", "/usr/games/stockfish")
+
+        result = find_mate_in_1_to_3(
+            fen=fen,
+            stockfish_path=stockfish_path,
+        )
+
+        # 4) Response
+        return {
+            "fen": fen,
+            "vision_confidence": confidence,
+            "mate_found": result is not None,
+            "mate_in": result.mate_in if result else None,
+            "moves_san": result.moves_san if result else [],
+            "moves_uci": result.moves_uci if result else [],
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
