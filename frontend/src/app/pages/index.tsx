@@ -5,7 +5,7 @@ import { AuthNav } from "@/components/AuthNav";
 import { getAccessTokenClient } from "lib/getAccessTokenClient";
 
 const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8002";
+  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8010";
 
 type SolveResponse = unknown; // tighten later if you know the shape
 

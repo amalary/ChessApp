@@ -48,6 +48,8 @@ app = FastAPI()
 origins = [
     "http://localhost:3000",
     "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
 ]
 
 app.add_middleware(
@@ -103,6 +105,14 @@ async def solve(
             or shutil.which("stockfish")
             or "/usr/games/stockfish"
         )
+        if not Path(stockfish_path).exists() and shutil.which("stockfish") is None:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Stockfish not found. Install Stockfish locally and set STOCKFISH_PATH "
+                    "to the executable path."
+                ),
+            )
 
         result = find_mate_in_1_to_3(
             fen=fen,

@@ -10,6 +10,11 @@ function extractSolutionLines(data: SolveResponse): string[] {
   if (typeof data === 'string') return [data];
 
   if (typeof data === 'object' && data !== null) {
+    if ('moves_san' in data && Array.isArray((data as { moves_san?: unknown }).moves_san)) {
+      const movesSan = (data as { moves_san: unknown }).moves_san as unknown[];
+      return movesSan.filter((m): m is string => typeof m === 'string');
+    }
+
     if ('moves' in data && Array.isArray((data as { moves?: unknown }).moves)) {
       const moves = (data as { moves: unknown }).moves as unknown[];
       return moves.filter((m): m is string => typeof m === 'string');
@@ -56,7 +61,7 @@ export default function SolveTestClient() {
   }, [file]);
 
   const backendUrl = useMemo(() => {
-    return process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://127.0.0.1:8000';
+    return process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://127.0.0.1:8010';
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -79,10 +84,6 @@ export default function SolveTestClient() {
     }
 
     const token = process.env.NEXT_PUBLIC_AUTH0_TEST_TOKEN;
-    if (!token) {
-      setError('Missing NEXT_PUBLIC_AUTH0_TEST_TOKEN in .env.local');
-      return;
-    }
 
     const formData = new FormData();
     formData.append('image', file);
@@ -91,11 +92,14 @@ export default function SolveTestClient() {
     setLoading(true);
 
     try {
+      const headers: HeadersInit = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
       const res = await fetch(`${backendUrl}/solve`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers,
         body: formData,
       });
 
@@ -201,7 +205,7 @@ export default function SolveTestClient() {
                 disabled={loading || !file}
                 className={`neumo-pill px-8 py-3 text-base font-medium disabled:opacity-60 disabled:active:translate-y-0 ${pressable}`}
               >
-                {loading ? 'Sending...' : 'Send to /solve'}
+                {loading ? 'Sending...' : 'Solve'}
               </button>
             </div>
           </form>

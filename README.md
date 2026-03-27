@@ -45,6 +45,6 @@
 +---------------------------+
 
 To run the frontend 'npm run dev' in the front end directory 
-To run the backend 'uvicorn app.main:app --reload --env-file ../.env' in the backend directory using a command prompt in CLI 
+To run the backend 'uvicorn app.main:app --env-file ../.env --host 127.0.0.1 --port 8010' in the backend directory using a command prompt in CLI 
 Long in page test rout " http://localhost:3000/login-test " 
 App test page route " http://localhost:3000/solve-test " 
