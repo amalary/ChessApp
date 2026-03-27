@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTheme } from 'next-themes';
+import { Crown } from 'lucide-react';
 
 type SolveResponse = unknown;
 
@@ -39,6 +40,9 @@ export default function SolveTestClient() {
   const [solutionLines, setSolutionLines] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // NEW: Queen color toggle
+  const [queenIsWhite, setQueenIsWhite] = useState(true);
 
   useEffect(() => {
     if (!file) {
@@ -82,6 +86,7 @@ export default function SolveTestClient() {
 
     const formData = new FormData();
     formData.append('image', file);
+    formData.append('expected_side_to_move', queenIsWhite ? 'white' : 'black');
 
     setLoading(true);
 
@@ -121,7 +126,11 @@ export default function SolveTestClient() {
     }
   };
 
-  // Neumorphic “press” effect (works on click / active)
+  // UPDATED: Toggle queen color on click
+  const handleQueenClick = () => {
+    setQueenIsWhite((prev) => !prev);
+  };
+
   const pressable =
     'transition-all duration-150 ease-out select-none ' +
     'shadow-[10px_10px_20px_rgba(0,0,0,0.12),-10px_-10px_20px_rgba(255,255,255,0.75)] ' +
@@ -132,8 +141,23 @@ export default function SolveTestClient() {
   return (
     <main className="min-h-screen flex items-center justify-center p-6">
       <div className="w-full max-w-[520px]">
-        {/* Theme toggle moved INSIDE the main container (top-right) */}
         <div className="neumo-surface p-8 md:p-10 relative">
+          <div className="absolute top-4 left-4">
+            <button
+              type="button"
+              onClick={handleQueenClick}
+              className={`neumo-pill h-12 w-12 flex items-center justify-center ${pressable}`}
+              aria-label="Toggle chess queen color"
+            >
+              <Crown
+                className="h-6 w-6 transition-colors duration-200"
+                color={queenIsWhite ? 'white' : 'black'}
+                fill={queenIsWhite ? 'white' : 'black'}
+                strokeWidth={2.2}
+              />
+            </button>
+          </div>
+
           <div className="absolute top-4 right-4">
             <button
               type="button"
