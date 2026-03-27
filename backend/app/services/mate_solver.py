@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import chess
 import chess.engine
@@ -42,8 +42,19 @@ def find_mate_in_1_to_3(
             multipv=1,
         )
 
-        score = info.get("score")
-        pv = info.get("pv") or []
+        primary: Dict[str, Any]
+        if isinstance(info, list):
+            if not info:
+                return None
+            primary = info[0]
+        else:
+            primary = info
+
+        if not isinstance(primary, dict):
+            return None
+
+        score = primary.get("score")
+        pv = primary.get("pv") or []
 
         if score is None:
             return None
