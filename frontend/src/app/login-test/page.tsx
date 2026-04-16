@@ -1,9 +1,30 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Castle } from "lucide-react";
+import SolveTestClient from "../solve-test/solve-test-client";
 
 export default function LoginTestPage() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const formData = new FormData(event.currentTarget);
+    const username = String(formData.get("username") ?? "").trim();
+    const password = String(formData.get("password") ?? "").trim();
+
+    if (!username || !password) {
+      return;
+    }
+
+    setIsLoggedIn(true);
+  };
+
+  if (isLoggedIn) {
+    return <SolveTestClient />;
+  }
+
   return (
     <main className="min-h-screen w-full flex items-center justify-center p-6
       bg-[radial-gradient(1000px_circle_at_20%_20%,#4f8dff_0%,transparent_55%),
@@ -37,15 +58,16 @@ export default function LoginTestPage() {
           </div>
 
           {/* Body */}
-          <div className="px-10 py-8 space-y-5">
-            <NeumoInput placeholder="Username" />
-            <NeumoInput placeholder="Password" type="password" />
+          <form onSubmit={handleSubmit} className="px-10 py-8 space-y-5">
+            <NeumoInput name="username" placeholder="Username" />
+            <NeumoInput name="password" placeholder="Password" type="password" />
 
             <p className="text-sm text-slate-500 cursor-pointer hover:text-slate-700 transition">
               Forgot Password?
             </p>
 
             <button
+              type="submit"
               className="w-full h-14 rounded-2xl text-white text-lg font-semibold
                 bg-[linear-gradient(180deg,#63c0ff_0%,#2f7bf4_100%)]
                 shadow-[0_18px_35px_rgba(47,123,244,0.35),
@@ -63,7 +85,7 @@ export default function LoginTestPage() {
                 Signup
               </span>
             </p>
-          </div>
+          </form>
         </section>
       </div>
     </main>
@@ -71,9 +93,11 @@ export default function LoginTestPage() {
 }
 
 function NeumoInput({
+  name,
   placeholder,
   type = "text",
 }: {
+  name: string;
   placeholder: string;
   type?: string;
 }) {
@@ -85,10 +109,12 @@ function NeumoInput({
         border border-white/50"
     >
       <input
+        name={name}
         type={type}
         placeholder={placeholder}
         className="w-full bg-transparent outline-none
           text-slate-700 placeholder:text-slate-400 text-base"
+        required
       />
     </div>
   );

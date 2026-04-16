@@ -73,4 +73,105 @@ body {
     outline: 10px solid rgb(var(--ring));
     outline-offset: -10px;
   }
+
+  .chess-loading-track {
+    position: relative;
+    width: 180px;
+    height: 40px;
+    border-radius: 9999px;
+    background:
+      repeating-linear-gradient(
+        90deg,
+        rgba(var(--fg), 0.08) 0 18px,
+        rgba(var(--fg), 0.03) 18px 36px
+      ),
+      rgb(var(--surface));
+    box-shadow:
+      inset 6px 6px 12px rgb(var(--shadow-dark)),
+      inset -6px -6px 12px rgb(var(--shadow-light));
+    overflow: hidden;
+  }
+
+  .chess-loading-piece {
+    position: absolute;
+    top: 50%;
+    left: 8px;
+    transform: translateY(-50%);
+    animation: chess-piece-slide 1.3s ease-in-out infinite;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
+  }
+
+  .chess-loading-track-inline {
+    position: relative;
+    width: 92px;
+    height: 28px;
+    border-radius: 9999px;
+    background:
+      repeating-linear-gradient(
+        90deg,
+        rgba(var(--fg), 0.08) 0 12px,
+        rgba(var(--fg), 0.03) 12px 24px
+      ),
+      rgb(var(--surface));
+    box-shadow:
+      inset 4px 4px 8px rgb(var(--shadow-dark)),
+      inset -4px -4px 8px rgb(var(--shadow-light));
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .chess-loading-piece-inline {
+    position: absolute;
+    top: 50%;
+    left: 6px;
+    transform: translateY(-50%);
+    animation: chess-piece-slide-inline 1.2s ease-in-out infinite;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.18));
+  }
+
+  .chess-loading-text::after {
+    content: "";
+    display: inline-block;
+    width: 1.2em;
+    text-align: left;
+    animation: chess-dots 1.1s steps(4, end) infinite;
+  }
+}
+
+@keyframes chess-piece-slide {
+  0% {
+    transform: translate(0, -50%) scale(1);
+  }
+  45% {
+    transform: translate(124px, -50%) scale(1.06);
+  }
+  60% {
+    transform: translate(124px, -50%) scale(0.96);
+  }
+  100% {
+    transform: translate(0, -50%) scale(1);
+  }
+}
+
+@keyframes chess-dots {
+  0% { content: ""; }
+  25% { content: "."; }
+  50% { content: ".."; }
+  75% { content: "..."; }
+  100% { content: ""; }
+}
+
+@keyframes chess-piece-slide-inline {
+  0% {
+    transform: translate(0, -50%) scale(1);
+  }
+  45% {
+    transform: translate(58px, -50%) scale(1.04);
+  }
+  60% {
+    transform: translate(58px, -50%) scale(0.97);
+  }
+  100% {
+    transform: translate(0, -50%) scale(1);
+  }
 }

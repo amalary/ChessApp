@@ -1,53 +1,55 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useId, useMemo, useState } from 'react';
 import { useTheme } from 'next-themes';
 import { Crown } from 'lucide-react';
 
-type SolveResponse = unknown;
+type SolveResponse = {
+  solution_line?: unknown;
+  moves_san?: unknown;
+  mate_found?: boolean;
+  detail?: unknown;
+};
 
 function extractSolutionLines(data: SolveResponse): string[] {
-  if (typeof data === 'string') return [data];
-
-  if (typeof data === 'object' && data !== null) {
-    if ('moves_san' in data && Array.isArray((data as { moves_san?: unknown }).moves_san)) {
-      const movesSan = (data as { moves_san: unknown }).moves_san as unknown[];
-      return movesSan.filter((m): m is string => typeof m === 'string');
-    }
-
-    if ('moves' in data && Array.isArray((data as { moves?: unknown }).moves)) {
-      const moves = (data as { moves: unknown }).moves as unknown[];
-      return moves.filter((m): m is string => typeof m === 'string');
-    }
-
-    if ('solution' in data) {
-      const sol = (data as { solution?: unknown }).solution;
-      if (typeof sol === 'string') return [sol];
-      if (Array.isArray(sol)) return sol.filter((m): m is string => typeof m === 'string');
-    }
-
-    if ('detail' in data && typeof (data as { detail?: unknown }).detail === 'string') {
-      return [(data as { detail: string }).detail];
-    }
+  if (typeof data.solution_line === 'string' && data.solution_line.trim()) {
+    return [data.solution_line.trim()];
   }
 
-  return [];
+  const moves = Array.isArray(data.moves_san)
+    ? data.moves_san.filter((m): m is string => typeof m === 'string')
+    : [];
+
+  if (moves.length > 0) {
+    const singleLine = moves.length === 1 ? moves[0] : moves.join(' ');
+    return [singleLine];
+  }
+
+  if (data.mate_found === false) {
+    return ['No forced mate found in the search range.'];
+  }
+
+  if (typeof data.detail === 'string') {
+    return [data.detail];
+  }
+
+  return ['No mate solution returned.'];
 }
 
 export default function SolveTestClient() {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const isDark = theme === 'dark' || (theme === 'system' && resolvedTheme === 'dark');
+  const fileInputId = useId();
 
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  const [result, setResult] = useState<SolveResponse | null>(null);
   const [solutionLines, setSolutionLines] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // NEW: Queen color toggle
   const [queenIsWhite, setQueenIsWhite] = useState(true);
+  const [sideOverrideEnabled, setSideOverrideEnabled] = useState(false);
 
   useEffect(() => {
     if (!file) {
@@ -67,7 +69,6 @@ export default function SolveTestClient() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const chosen = e.target.files?.[0] ?? null;
     setFile(chosen);
-    setResult(null);
     setSolutionLines([]);
     setError(null);
   };
@@ -75,7 +76,6 @@ export default function SolveTestClient() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
-    setResult(null);
     setSolutionLines([]);
 
     if (!file) {
@@ -87,7 +87,9 @@ export default function SolveTestClient() {
 
     const formData = new FormData();
     formData.append('image', file);
-    formData.append('expected_side_to_move', queenIsWhite ? 'white' : 'black');
+    if (sideOverrideEnabled) {
+      formData.append('expected_side_to_move', queenIsWhite ? 'white' : 'black');
+    }
 
     setLoading(true);
 
@@ -118,7 +120,6 @@ export default function SolveTestClient() {
 
         setError(msg);
       } else {
-        setResult(data);
         const lines = extractSolutionLines(data);
         setSolutionLines(lines.length ? lines : ['(No solution returned)']);
       }
@@ -130,17 +131,22 @@ export default function SolveTestClient() {
     }
   };
 
-  // UPDATED: Toggle queen color on click
   const handleQueenClick = () => {
+    setSideOverrideEnabled(true);
     setQueenIsWhite((prev) => !prev);
   };
 
   const pressable =
     'transition-all duration-150 ease-out select-none ' +
     'shadow-[10px_10px_20px_rgba(0,0,0,0.12),-10px_-10px_20px_rgba(255,255,255,0.75)] ' +
+    'hover:-translate-y-[1px] hover:shadow-[12px_12px_24px_rgba(0,0,0,0.16),-12px_-12px_24px_rgba(255,255,255,0.8)] ' +
+    'hover:outline hover:outline-2 hover:outline-black/10 dark:hover:outline-white/25 ' +
     'active:translate-y-[1px] ' +
     'active:shadow-[inset_8px_8px_16px_rgba(0,0,0,0.12),inset_-8px_-8px_16px_rgba(255,255,255,0.75)] ' +
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10';
+
+  const queenStroke = isDark ? '#e2e8f0' : '#111827';
+  const controlsLocked = loading;
 
   return (
     <main className="min-h-screen flex items-center justify-center p-6">
@@ -150,13 +156,23 @@ export default function SolveTestClient() {
             <button
               type="button"
               onClick={handleQueenClick}
-              className={`neumo-pill h-12 w-12 flex items-center justify-center ${pressable}`}
-              aria-label="Toggle chess queen color"
+              disabled={controlsLocked}
+              className={`neumo-pill h-12 w-12 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 ${pressable}`}
+              aria-label={
+                sideOverrideEnabled
+                  ? `Side override enabled: ${queenIsWhite ? 'white' : 'black'}. Click to toggle.`
+                  : 'Side override is auto. Click to enable manual side toggle.'
+              }
+              title={
+                sideOverrideEnabled
+                  ? `Side override: ${queenIsWhite ? 'white' : 'black'}`
+                  : 'Side override: auto'
+              }
             >
               <Crown
                 className="h-6 w-6 transition-colors duration-200"
-                color={queenIsWhite ? 'white' : 'black'}
-                fill={queenIsWhite ? 'white' : 'black'}
+                color={queenStroke}
+                fill={queenIsWhite ? 'none' : queenStroke}
                 strokeWidth={2.2}
               />
             </button>
@@ -174,29 +190,59 @@ export default function SolveTestClient() {
           </div>
 
           <form onSubmit={handleSubmit}>
-            <div className="flex justify-center">
-              <label
-                className={`neumo-pill px-8 py-4 cursor-pointer text-lg font-medium tracking-tight ${pressable}`}
-              >
-                Upload Image
-                <input type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
-              </label>
-            </div>
+            <input
+              id={fileInputId}
+              type="file"
+              accept="image/*"
+              onChange={handleFileChange}
+              disabled={controlsLocked}
+              className="hidden"
+            />
 
-            <div className="mt-10 flex justify-center">
-              <div className="neumo-ring w-[260px] h-[260px] p-4 flex items-center justify-center">
-                <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center">
-                  {previewUrl ? (
-                    <img src={previewUrl} alt="Puzzle preview" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full neumo-inset flex items-center justify-center">
-                      <span className="text-sm opacity-60 px-6 text-center">
-                        Upload a puzzle image to preview it here
-                      </span>
-                    </div>
-                  )}
-                </div>
+            {!file && (
+              <div className="flex justify-center">
+                <label
+                  htmlFor={controlsLocked ? undefined : fileInputId}
+                  onClick={controlsLocked ? (e) => e.preventDefault() : undefined}
+                  aria-disabled={controlsLocked}
+                  className={`neumo-pill px-8 py-4 text-lg font-medium tracking-tight ${pressable} ${controlsLocked ? 'cursor-not-allowed opacity-60 pointer-events-none' : 'cursor-pointer'}`}
+                >
+                  Upload Image
+                </label>
               </div>
+            )}
+
+            <div className={`${file ? 'mt-6' : 'mt-10'} flex justify-center`}>
+              <label
+                htmlFor={controlsLocked ? undefined : fileInputId}
+                onClick={controlsLocked ? (e) => e.preventDefault() : undefined}
+                className={`group ${controlsLocked ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+                aria-label="Upload or replace puzzle image"
+                aria-disabled={controlsLocked}
+              >
+                <div className="neumo-ring w-[260px] h-[260px] p-4 flex items-center justify-center">
+                  <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center relative">
+                    {previewUrl ? (
+                      <>
+                        <img src={previewUrl} alt="Puzzle preview" className="w-full h-full object-cover" />
+                        <div
+                          className={`absolute inset-0 flex items-center justify-center bg-black/35 opacity-0 transition-opacity duration-150 ${controlsLocked ? '' : 'group-hover:opacity-100'}`}
+                        >
+                          <span className="text-white text-sm font-medium px-4 text-center">
+                            Click to re-upload
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div
+                        className={`w-full h-full neumo-inset flex items-center justify-center transition-all duration-150 ${controlsLocked ? '' : 'group-hover:brightness-[1.03] group-hover:scale-[1.01]'}`}
+                      >
+                        <span className="text-sm opacity-60 px-6 text-center">Upload a puzzle image</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </label>
             </div>
 
             <div className="mt-8 flex justify-center">
@@ -232,11 +278,6 @@ export default function SolveTestClient() {
               <p className="text-base opacity-70">Upload an image and press solve.</p>
             )}
 
-            {result !== null && (
-              <pre className="mt-6 text-xs whitespace-pre-wrap break-words opacity-70">
-                {typeof result === 'string' ? result : JSON.stringify(result, null, 2)}
-              </pre>
-            )}
           </div>
         </div>
       </div>

@@ -73,7 +73,7 @@ async def root():
 @app.post("/solve")
 async def solve(
     image: UploadFile = File(...),
-    expected_side_to_move: str = Form("white"),
+    expected_side_to_move: str | None = Form(None),
 ):
     try:
         image_bytes = await image.read()
