@@ -1,10 +1,15 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useSyncExternalStore } from "react";
 import { Castle } from "lucide-react";
 import SolveTestClient from "../solve-test/solve-test-client";
 
+function subscribe() {
+  return () => {};
+}
+
 export default function LoginTestPage() {
+  const mounted = useSyncExternalStore(subscribe, () => true, () => false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -20,6 +25,10 @@ export default function LoginTestPage() {
 
     setIsLoggedIn(true);
   };
+
+  if (!mounted) {
+    return <main className="min-h-screen w-full" />;
+  }
 
   if (isLoggedIn) {
     return <SolveTestClient />;

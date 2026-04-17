@@ -7,6 +7,8 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import health
+from app.services.board_validate import board_map_to_fen, rotate_board_map_180
+from app.services.board_validation import validate_fen
 from app.services.gemini_fen import fen_from_image_bytes
 from app.services.mate_solver import find_mate_in_1_to_3
 
@@ -42,6 +44,92 @@ def _bootstrap_env() -> None:
 
 
 _bootstrap_env()
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _normalize_side(side: str | None) -> str | None:
+    if not side:
+        return None
+    lowered = side.strip().lower()
+    if lowered in {"white", "w"}:
+        return "white"
+    if lowered in {"black", "b"}:
+        return "black"
+    return None
+
+
+def _board_map_from_fen(fen: str) -> dict[str, str]:
+    board = chess.Board(fen)
+    board_map = {chess.square_name(sq): "." for sq in chess.SQUARES}
+    for sq, piece in board.piece_map().items():
+        board_map[chess.square_name(sq)] = piece.symbol()
+    return board_map
+
+
+def _build_fallback_fens(fen: str, expected_side: str | None) -> list[str]:
+    board = chess.Board(fen)
+    board_map = _board_map_from_fen(fen)
+    rotated_map = rotate_board_map_180(board_map)
+
+    current_side = "white" if board.turn else "black"
+    sides = [current_side]
+    if expected_side in {"white", "black"} and expected_side not in sides:
+        sides.insert(0, expected_side)
+
+    ordered: list[str] = []
+    for side in sides:
+        ordered.append(board_map_to_fen(board_map, side))
+        ordered.append(board_map_to_fen(rotated_map, side))
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in ordered:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return deduped
+
+
+def _candidate_score(
+    candidate_fen: str,
+    mate_result,
+    preferred_fen: str,
+    expected_side: str | None,
+) -> float:
+    score = 0.0
+    if mate_result is not None:
+        score += 2.0
+        score += max(0.0, 0.55 - (mate_result.mate_in * 0.12))
+    if candidate_fen == preferred_fen:
+        score += 0.2
+    if expected_side in {"white", "black"}:
+        try:
+            side = "white" if chess.Board(candidate_fen).turn else "black"
+            if side == expected_side:
+                score += 0.25
+        except Exception:
+            pass
+    return score
 
 app = FastAPI()
 
@@ -86,6 +174,7 @@ async def solve(
             image_bytes,
             image.filename,
             expected_side_to_move=expected_side_to_move,
+            attempts=max(1, _env_int("GEMINI_TRANSCRIBE_ATTEMPTS", 5)),
         )
         fen = gemini_result["fen"]
         confidence = gemini_result["confidence"]
@@ -118,6 +207,53 @@ async def solve(
             fen=fen,
             stockfish_path=stockfish_path,
         )
+
+        expected_side = _normalize_side(expected_side_to_move)
+        fallback_confidence_threshold = max(
+            0.0, min(1.0, _env_float("SOLVE_FALLBACK_CONFIDENCE", 0.90))
+        )
+        should_run_fallback = (result is None) or (float(confidence) < fallback_confidence_threshold)
+
+        if should_run_fallback:
+            fallback_fens = _build_fallback_fens(fen, expected_side)
+            fallback_think_time_s = max(0.6, _env_float("SOLVE_FALLBACK_THINK_TIME_S", 2.5))
+            fallback_max_depth = max(10, _env_int("SOLVE_FALLBACK_MAX_DEPTH", 24))
+
+            best_fen = fen
+            best_result = result
+            best_score = _candidate_score(
+                candidate_fen=fen,
+                mate_result=result,
+                preferred_fen=fen,
+                expected_side=expected_side,
+            )
+
+            for candidate_fen in fallback_fens:
+                if candidate_fen == fen:
+                    continue
+                if not validate_fen(candidate_fen).passed:
+                    continue
+
+                candidate_result = find_mate_in_1_to_3(
+                    fen=candidate_fen,
+                    stockfish_path=stockfish_path,
+                    think_time_s=fallback_think_time_s,
+                    max_depth=fallback_max_depth,
+                )
+                score = _candidate_score(
+                    candidate_fen=candidate_fen,
+                    mate_result=candidate_result,
+                    preferred_fen=fen,
+                    expected_side=expected_side,
+                )
+                if score > best_score:
+                    best_score = score
+                    best_fen = candidate_fen
+                    best_result = candidate_result
+
+            fen = best_fen
+            result = best_result
+            gemini_result["side_to_move"] = "white" if chess.Board(fen).turn else "black"
 
         # 4) Response
         return {

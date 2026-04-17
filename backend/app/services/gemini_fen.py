@@ -8,6 +8,8 @@ from typing import Any, Dict, Iterable
 from google import genai
 from PIL import Image, ImageEnhance, ImageOps
 
+from app.services.board_validation import validate_fen
+
 DEFAULT_MODEL_CANDIDATES = [
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
@@ -97,6 +99,26 @@ def _model_candidates() -> list[str]:
     if explicit:
         return [explicit] + [m for m in DEFAULT_MODEL_CANDIDATES if m != explicit]
     return DEFAULT_MODEL_CANDIDATES
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
 
 
 def _normalize_side(value: Any) -> str | None:
@@ -236,20 +258,41 @@ def _call_gemini_structured(
     return json.loads(json_text)
 
 
-def _pick_consensus_fen(candidates: Iterable[dict[str, Any]]) -> dict[str, Any]:
+def _pick_consensus_fen(
+    candidates: Iterable[dict[str, Any]],
+    expected_side: str | None = None,
+    attempts_used: int | None = None,
+) -> dict[str, Any]:
     rows = list(candidates)
     if not rows:
         raise ValueError("Gemini could not produce a valid board transcription.")
 
-    counts = Counter(item["fen"] for item in rows)
-    best_fen, _ = counts.most_common(1)[0]
-    fen_rows = [item for item in rows if item["fen"] == best_fen]
-    avg_conf = sum(item["confidence"] for item in fen_rows) / len(fen_rows)
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in rows:
+        groups.setdefault(item["fen"], []).append(item)
+
+    best_fen = ""
+    best_score = float("-inf")
+    best_rows: list[dict[str, Any]] = []
+    for fen, fen_rows in groups.items():
+        vote_count = len(fen_rows)
+        avg_conf = sum(item["confidence"] for item in fen_rows) / vote_count
+        valid_count = sum(1 for item in fen_rows if bool(item.get("is_valid")))
+        side = fen_rows[0]["side"]
+        score = (vote_count * 2.0) + avg_conf + (valid_count / vote_count)
+        if expected_side and side == expected_side:
+            score += 0.2
+        if score > best_score:
+            best_score = score
+            best_fen = fen
+            best_rows = fen_rows
+
+    avg_conf = sum(item["confidence"] for item in best_rows) / len(best_rows)
     return {
         "fen": best_fen,
         "confidence": round(avg_conf, 4),
-        "side_to_move": "white" if fen_rows[0]["side"] == "w" else "black",
-        "attempts_used": len(rows),
+        "side_to_move": "white" if best_rows[0]["side"] == "w" else "black",
+        "attempts_used": attempts_used if attempts_used is not None else len(rows),
     }
 
 
@@ -257,7 +300,7 @@ def fen_from_image_bytes(
     image_bytes: bytes,
     filename: str | None = None,
     expected_side_to_move: str | None = None,
-    attempts: int = 2,
+    attempts: int = 3,
 ) -> Dict[str, Any]:
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -268,25 +311,15 @@ def fen_from_image_bytes(
     expected = _normalize_side(expected_side_to_move)
     variants = _preprocess_image_variants(image_bytes, filename)
 
+    all_candidates: list[dict[str, Any]] = []
     valid_candidates: list[dict[str, Any]] = []
     correction_message: str | None = None
     last_error = "No response from Gemini."
-    early_exit_confidence = 0.9
-    env_early_exit_confidence = os.getenv("GEMINI_EARLY_EXIT_CONFIDENCE")
-    if env_early_exit_confidence:
-        try:
-            early_exit_confidence = float(env_early_exit_confidence)
-        except ValueError:
-            pass
+    early_exit_confidence = max(0.0, min(1.0, _env_float("GEMINI_EARLY_EXIT_CONFIDENCE", 0.92)))
+    min_attempts = max(1, _env_int("GEMINI_MIN_ATTEMPTS", 3))
+    max_attempts = max(1, _env_int("GEMINI_TRANSCRIBE_ATTEMPTS", attempts))
+    consensus_exit_votes = max(2, _env_int("GEMINI_CONSENSUS_EXIT_VOTES", 3))
 
-    env_attempts = os.getenv("GEMINI_TRANSCRIBE_ATTEMPTS")
-    if env_attempts:
-        try:
-            attempts = int(env_attempts)
-        except ValueError:
-            pass
-
-    max_attempts = max(1, attempts)
     for idx in range(max_attempts):
         payload, mime = variants[idx % len(variants)]
         try:
@@ -301,15 +334,13 @@ def fen_from_image_bytes(
                 )
                 continue
 
-            if expected and side != expected:
-                last_error = (
-                    f"Gemini returned side_to_move={side}, expected {expected}."
-                )
+            side_matches_expected = (expected is None) or (side == expected)
+            if expected and not side_matches_expected:
+                last_error = f"Gemini returned side_to_move={side}, expected {expected}."
                 correction_message = (
                     f"Use side_to_move='{ 'white' if expected == 'w' else 'black' }'. "
-                    "Re-evaluate board_map carefully."
+                    "Re-evaluate board_map carefully, but still return your best board_map."
                 )
-                continue
 
             fen = _board_map_to_fen(board_map, side)
             confidence_raw = data.get("confidence", 0.0)
@@ -323,13 +354,34 @@ def fen_from_image_bytes(
                     "fen": fen,
                     "confidence": max(0.0, min(1.0, confidence)),
                     "side": side,
+                    "is_valid": validate_fen(fen).passed,
+                    "side_matches_expected": side_matches_expected,
                 }
             )
-            # Fast path: return immediately when the first valid transcription is high confidence.
-            if confidence >= early_exit_confidence:
+            all_candidates.extend(valid_candidates[-1:])
+
+            if not valid_candidates[-1]["is_valid"]:
+                last_error = "Gemini produced an implausible board position."
+                correction_message = (
+                    "Previous board_map produced an invalid chess position. "
+                    "Re-check king count, pawn ranks, and side to move."
+                )
+                continue
+
+            # Fast path: once we have enough attempts and repeated agreement at high confidence.
+            fen_count = sum(1 for item in valid_candidates if item["fen"] == fen)
+            fen_avg_conf = sum(item["confidence"] for item in valid_candidates if item["fen"] == fen) / max(
+                1, fen_count
+            )
+            if (
+                (idx + 1) >= min_attempts
+                and fen_count >= consensus_exit_votes
+                and fen_avg_conf >= early_exit_confidence
+                and side_matches_expected
+            ):
                 return {
                     "fen": fen,
-                    "confidence": max(0.0, min(1.0, confidence)),
+                    "confidence": round(fen_avg_conf, 4),
                     "side_to_move": "white" if side == "w" else "black",
                     "attempts_used": idx + 1,
                 }
@@ -345,4 +397,16 @@ def fen_from_image_bytes(
 
     if not valid_candidates:
         raise ValueError(f"Gemini could not transcribe board: {last_error}")
-    return _pick_consensus_fen(valid_candidates)
+
+    valid_only = [row for row in valid_candidates if bool(row.get("is_valid"))]
+    if valid_only:
+        return _pick_consensus_fen(
+            valid_only,
+            expected_side=expected,
+            attempts_used=max_attempts,
+        )
+    return _pick_consensus_fen(
+        all_candidates if all_candidates else valid_candidates,
+        expected_side=expected,
+        attempts_used=max_attempts,
+    )

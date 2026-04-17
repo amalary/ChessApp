@@ -7,9 +7,95 @@ import { Crown } from 'lucide-react';
 type SolveResponse = {
   solution_line?: unknown;
   moves_san?: unknown;
-  mate_found?: boolean;
+  mate_found?: unknown;
+  mate_in?: unknown;
+  vision_confidence?: unknown;
+  vision_side_to_move?: unknown;
+  vision_attempts_used?: unknown;
+  error?: unknown;
   detail?: unknown;
 };
+
+type SolveMeta = {
+  sideToMove: 'white' | 'black' | null;
+  confidence: number | null;
+  attemptsUsed: number | null;
+  mateFound: boolean | null;
+  mateIn: number | null;
+};
+
+function toText(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function toBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  return null;
+}
+
+function normalizeSide(value: unknown): 'white' | 'black' | null {
+  const text = toText(value)?.toLowerCase();
+  if (!text) {
+    return null;
+  }
+  if (text === 'white' || text === 'w') {
+    return 'white';
+  }
+  if (text === 'black' || text === 'b') {
+    return 'black';
+  }
+  return null;
+}
+
+function extractSolveMeta(data: SolveResponse): SolveMeta {
+  const rawConfidence = toFiniteNumber(data.vision_confidence);
+  const normalizedConfidence =
+    rawConfidence === null
+      ? null
+      : Math.max(0, Math.min(1, rawConfidence > 1 ? rawConfidence / 100 : rawConfidence));
+
+  const rawMateIn = toFiniteNumber(data.mate_in);
+  const mateIn =
+    rawMateIn !== null && Number.isInteger(rawMateIn) && rawMateIn >= 1 ? rawMateIn : null;
+
+  const rawAttempts = toFiniteNumber(data.vision_attempts_used);
+  const attemptsUsed =
+    rawAttempts !== null && Number.isInteger(rawAttempts) && rawAttempts >= 1 ? rawAttempts : null;
+
+  return {
+    sideToMove: normalizeSide(data.vision_side_to_move),
+    confidence: normalizedConfidence,
+    attemptsUsed,
+    mateFound: toBoolean(data.mate_found),
+    mateIn,
+  };
+}
+
+function formatConfidence(confidence: number | null): string {
+  if (confidence === null) {
+    return 'Unavailable';
+  }
+  return `${(confidence * 100).toFixed(1)}%`;
+}
 
 function extractSolutionLines(data: SolveResponse): string[] {
   if (typeof data.solution_line === 'string' && data.solution_line.trim()) {
@@ -45,11 +131,11 @@ export default function SolveTestClient() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const [solutionLines, setSolutionLines] = useState<string[]>([]);
+  const [solveMeta, setSolveMeta] = useState<SolveMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const [queenIsWhite, setQueenIsWhite] = useState(true);
-  const [sideOverrideEnabled, setSideOverrideEnabled] = useState(false);
 
   useEffect(() => {
     if (!file) {
@@ -70,6 +156,7 @@ export default function SolveTestClient() {
     const chosen = e.target.files?.[0] ?? null;
     setFile(chosen);
     setSolutionLines([]);
+    setSolveMeta(null);
     setError(null);
   };
 
@@ -77,6 +164,7 @@ export default function SolveTestClient() {
     e.preventDefault();
     setError(null);
     setSolutionLines([]);
+    setSolveMeta(null);
 
     if (!file) {
       setError('Please choose an image first.');
@@ -87,9 +175,7 @@ export default function SolveTestClient() {
 
     const formData = new FormData();
     formData.append('image', file);
-    if (sideOverrideEnabled) {
-      formData.append('expected_side_to_move', queenIsWhite ? 'white' : 'black');
-    }
+    formData.append('expected_side_to_move', queenIsWhite ? 'white' : 'black');
 
     setLoading(true);
 
@@ -122,6 +208,7 @@ export default function SolveTestClient() {
       } else {
         const lines = extractSolutionLines(data);
         setSolutionLines(lines.length ? lines : ['(No solution returned)']);
+        setSolveMeta(extractSolveMeta(data));
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Network error';
@@ -132,7 +219,6 @@ export default function SolveTestClient() {
   };
 
   const handleQueenClick = () => {
-    setSideOverrideEnabled(true);
     setQueenIsWhite((prev) => !prev);
   };
 
@@ -159,15 +245,9 @@ export default function SolveTestClient() {
               disabled={controlsLocked}
               className={`neumo-pill h-12 w-12 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 ${pressable}`}
               aria-label={
-                sideOverrideEnabled
-                  ? `Side override enabled: ${queenIsWhite ? 'white' : 'black'}. Click to toggle.`
-                  : 'Side override is auto. Click to enable manual side toggle.'
+                `Side to move: ${queenIsWhite ? 'white' : 'black'}. Click to toggle.`
               }
-              title={
-                sideOverrideEnabled
-                  ? `Side override: ${queenIsWhite ? 'white' : 'black'}`
-                  : 'Side override: auto'
-              }
+              title={`Side to move: ${queenIsWhite ? 'white' : 'black'}`}
             >
               <Crown
                 className="h-6 w-6 transition-colors duration-200"
@@ -189,7 +269,7 @@ export default function SolveTestClient() {
             </button>
           </div>
 
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} aria-busy={loading}>
             <input
               id={fileInputId}
               type="file"
@@ -246,13 +326,31 @@ export default function SolveTestClient() {
             </div>
 
             <div className="mt-8 flex justify-center">
-              <button
-                type="submit"
-                disabled={loading || !file}
-                className={`neumo-pill px-8 py-3 text-base font-medium disabled:opacity-60 disabled:active:translate-y-0 ${pressable}`}
-              >
-                {loading ? 'Sending...' : 'Solve'}
-              </button>
+              {loading ? (
+                <div
+                  className="neumo-surface-soft px-5 py-3 flex items-center gap-3"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div className="chess-loading-track-inline" aria-hidden="true">
+                    <Crown
+                      className="h-4 w-4 chess-loading-piece-inline"
+                      color={queenStroke}
+                      fill={queenIsWhite ? 'none' : queenStroke}
+                      strokeWidth={2}
+                    />
+                  </div>
+                  <span className="text-sm font-medium chess-loading-text">Sending</span>
+                </div>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!file}
+                  className={`neumo-pill px-8 py-3 text-base font-medium disabled:opacity-60 disabled:active:translate-y-0 ${pressable}`}
+                >
+                  Solve
+                </button>
+              )}
             </div>
           </form>
 
@@ -278,6 +376,42 @@ export default function SolveTestClient() {
               <p className="text-base opacity-70">Upload an image and press solve.</p>
             )}
 
+            {solveMeta && (
+              <div className="mt-8 pt-6 border-t border-black/10 dark:border-white/15">
+                <h3 className="text-lg font-semibold tracking-tight">Position Check</h3>
+                <dl className="mt-4 space-y-3 text-sm md:text-base">
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="opacity-70">Side to move</dt>
+                    <dd className="font-medium">{solveMeta.sideToMove ?? 'Unavailable'}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="opacity-70">Vision confidence</dt>
+                    <dd className="font-medium">{formatConfidence(solveMeta.confidence)}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="opacity-70">Vision attempts</dt>
+                    <dd className="font-medium">{solveMeta.attemptsUsed ?? 'Unavailable'}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="opacity-70">Mate status</dt>
+                    <dd className="font-medium">
+                      {solveMeta.mateFound === null
+                        ? 'Unavailable'
+                        : solveMeta.mateFound
+                          ? `Mate in ${solveMeta.mateIn ?? '?'}`
+                          : 'No forced mate (1-3)'}
+                    </dd>
+                  </div>
+                </dl>
+
+                {solveMeta.confidence !== null && solveMeta.confidence < 0.75 && (
+                  <p className="mt-4 text-xs opacity-70">
+                    Low vision confidence can cause wrong puzzle positions. Try a cleaner crop and
+                    verify the side selector in the top-left.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
