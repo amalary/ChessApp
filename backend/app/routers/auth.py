@@ -1,0 +1,131 @@
+from datetime import datetime
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, field_validator
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session
+
+from app.db_auth import get_db
+from app.models_auth import LocalAuthUser
+from app.security import hash_password, verify_password
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+class SignupRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3 or len(normalized) > 32:
+            raise ValueError("Username must be between 3 and 32 characters.")
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        if any(ch not in allowed for ch in normalized):
+            raise ValueError("Username can only use letters, numbers, dot, underscore, and dash.")
+        return normalized
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if "@" not in normalized or "." not in normalized.split("@", 1)[-1]:
+            raise ValueError("Enter a valid email address.")
+        return normalized
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("Password must be at least 8 characters.")
+        if not any(ch.isalpha() for ch in value) or not any(ch.isdigit() for ch in value):
+            raise ValueError("Password must include at least one letter and one number.")
+        return value
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Username is required.")
+        return normalized
+
+    @field_validator("password")
+    @classmethod
+    def ensure_password(cls, value: str) -> str:
+        if not value:
+            raise ValueError("Password is required.")
+        return value
+
+
+class UserView(BaseModel):
+    id: UUID
+    username: str
+    email: str
+    created_at: datetime | None
+
+
+class AuthResponse(BaseModel):
+    message: str
+    user: UserView
+
+
+@router.post("/signup", response_model=AuthResponse, status_code=201)
+def signup(payload: SignupRequest, db: Session = Depends(get_db)):
+    existing_user = db.execute(
+        select(LocalAuthUser).where(
+            or_(
+                func.lower(LocalAuthUser.username) == payload.username.lower(),
+                func.lower(LocalAuthUser.email) == payload.email.lower(),
+            )
+        )
+    ).scalar_one_or_none()
+    if existing_user is not None:
+        raise HTTPException(status_code=409, detail="Username or email is already registered.")
+
+    new_user = LocalAuthUser(
+        username=payload.username,
+        email=payload.email,
+        password_hash=hash_password(payload.password),
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    return AuthResponse(
+        message="Signup successful.",
+        user=UserView(
+            id=new_user.id,
+            username=new_user.username,
+            email=new_user.email,
+            created_at=new_user.created_at,
+        ),
+    )
+
+
+@router.post("/login", response_model=AuthResponse)
+def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    user = db.execute(
+        select(LocalAuthUser).where(func.lower(LocalAuthUser.username) == payload.username.lower())
+    ).scalar_one_or_none()
+    if user is None or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+
+    return AuthResponse(
+        message="Login successful.",
+        user=UserView(
+            id=user.id,
+            username=user.username,
+            email=user.email,
+            created_at=user.created_at,
+        ),
+    )

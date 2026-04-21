@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useSyncExternalStore } from "react";
+import React, { useMemo, useState, useSyncExternalStore } from "react";
 import { Castle } from "lucide-react";
 import SolveTestClient from "../solve-test/solve-test-client";
 
@@ -8,22 +8,105 @@ function subscribe() {
   return () => {};
 }
 
+type AuthMode = "login" | "signup";
+
+type AuthApiResponse = {
+  message?: unknown;
+  detail?: unknown;
+  user?: {
+    username?: unknown;
+  };
+};
+
+function parseMessage(data: AuthApiResponse, fallback: string): string {
+  if (typeof data.detail === "string" && data.detail.trim()) {
+    return data.detail.trim();
+  }
+  if (typeof data.message === "string" && data.message.trim()) {
+    return data.message.trim();
+  }
+  return fallback;
+}
+
 export default function LoginTestPage() {
   const mounted = useSyncExternalStore(subscribe, () => true, () => false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const backendUrl = useMemo(
+    () => process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:8010",
+    [],
+  );
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setErrorMessage(null);
+    setStatusMessage(null);
 
     const formData = new FormData(event.currentTarget);
     const username = String(formData.get("username") ?? "").trim();
+    const email = String(formData.get("email") ?? "").trim();
     const password = String(formData.get("password") ?? "").trim();
+    const confirmPassword = String(formData.get("confirmPassword") ?? "").trim();
 
     if (!username || !password) {
+      setErrorMessage("Username and password are required.");
       return;
     }
 
-    setIsLoggedIn(true);
+    if (authMode === "signup") {
+      if (!email) {
+        setErrorMessage("Email is required for sign up.");
+        return;
+      }
+      if (password !== confirmPassword) {
+        setErrorMessage("Passwords do not match.");
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const endpoint = authMode === "signup" ? "/auth/signup" : "/auth/login";
+      const payload =
+        authMode === "signup"
+          ? { username, email, password }
+          : { username, password };
+
+      const response = await fetch(`${backendUrl}${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      let data: AuthApiResponse = {};
+      try {
+        data = (await response.json()) as AuthApiResponse;
+      } catch {
+        data = {};
+      }
+
+      if (!response.ok) {
+        setErrorMessage(parseMessage(data, "Authentication failed."));
+        return;
+      }
+
+      const apiMessage = parseMessage(
+        data,
+        authMode === "signup" ? "Signup successful." : "Login successful.",
+      );
+      setStatusMessage(apiMessage);
+      setIsLoggedIn(true);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Network error";
+      setErrorMessage(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (!mounted) {
@@ -69,30 +152,67 @@ export default function LoginTestPage() {
           {/* Body */}
           <form onSubmit={handleSubmit} className="px-10 py-8 space-y-5">
             <NeumoInput name="username" placeholder="Username" />
+            {authMode === "signup" && (
+              <NeumoInput name="email" placeholder="Email" type="email" />
+            )}
             <NeumoInput name="password" placeholder="Password" type="password" />
+            {authMode === "signup" && (
+              <NeumoInput
+                name="confirmPassword"
+                placeholder="Confirm Password"
+                type="password"
+              />
+            )}
 
-            <p className="text-sm text-slate-500 cursor-pointer hover:text-slate-700 transition">
+            {errorMessage && (
+              <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                {errorMessage}
+              </p>
+            )}
+
+            {statusMessage && (
+              <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+                {statusMessage}
+              </p>
+            )}
+
+            <p className="text-sm text-slate-500">
               Forgot Password?
             </p>
 
             <button
               type="submit"
+              disabled={isSubmitting}
               className="w-full h-14 rounded-2xl text-white text-lg font-semibold
                 bg-[linear-gradient(180deg,#63c0ff_0%,#2f7bf4_100%)]
                 shadow-[0_18px_35px_rgba(47,123,244,0.35),
                         inset_0_2px_0_rgba(255,255,255,0.45)]
                 hover:brightness-[1.03]
                 active:brightness-[0.97]
-                transition"
+                transition disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              Login
+              {isSubmitting
+                ? authMode === "signup"
+                  ? "Signing up..."
+                  : "Logging in..."
+                : authMode === "signup"
+                  ? "Create Account"
+                  : "Login"}
             </button>
 
             <p className="text-center text-sm text-slate-500">
-              Not a member?{" "}
-              <span className="text-blue-600 font-semibold cursor-pointer hover:text-blue-700">
-                Signup
-              </span>
+              {authMode === "signup" ? "Already have an account?" : "Not a member?"}{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode((prev) => (prev === "login" ? "signup" : "login"));
+                  setErrorMessage(null);
+                  setStatusMessage(null);
+                }}
+                className="text-blue-600 font-semibold cursor-pointer hover:text-blue-700"
+              >
+                {authMode === "signup" ? "Login" : "Signup"}
+              </button>
             </p>
           </form>
         </section>

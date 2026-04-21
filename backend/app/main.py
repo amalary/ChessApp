@@ -6,7 +6,7 @@ import chess
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import health
+from app.routers import auth, health
 from app.services.board_validate import board_map_to_fen, rotate_board_map_180
 from app.services.board_validation import validate_fen
 from app.services.gemini_fen import fen_from_image_bytes
@@ -150,6 +150,7 @@ app.add_middleware(
 
 # Existing health router
 app.include_router(health.router)
+app.include_router(auth.router)
 
 
 @app.get("/")

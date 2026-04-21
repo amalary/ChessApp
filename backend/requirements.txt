@@ -35,4 +35,7 @@ PyJWT[crypto]>=2.8.0
 google-genai
 python-chess
 Pillow
+alembic
+sqlalchemy>=2.0
+psycopg[binary]
 
