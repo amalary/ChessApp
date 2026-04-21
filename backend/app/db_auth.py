@@ -8,30 +8,30 @@ from sqlalchemy.orm import Session, sessionmaker
 
 
 def _build_database_url() -> str:
+    db_user = os.environ.get("DB_USER")
+    db_password = os.environ.get("DB_PASSWORD")
+    db_name = os.environ.get("DB_NAME")
+    if db_user and db_password and db_name:
+        driver = os.environ.get("DB_DRIVER", "postgresql+psycopg")
+        password = quote_plus(db_password)
+
+        cloud_sql_connection_name = os.environ.get("CLOUD_SQL_CONNECTION_NAME")
+        if cloud_sql_connection_name:
+            socket_dir = os.environ.get("CLOUD_SQL_SOCKET_DIR", "/cloudsql")
+            socket_path = f"{socket_dir}/{cloud_sql_connection_name}"
+            return f"{driver}://{db_user}:{password}@/{db_name}?host={socket_path}"
+
+        host = os.environ.get("DB_HOST", "127.0.0.1")
+        port = os.environ.get("DB_PORT", "5432")
+        return f"{driver}://{db_user}:{password}@{host}:{port}/{db_name}"
+
     direct_url = os.environ.get("DATABASE_URL")
     if direct_url:
         return direct_url
 
-    db_user = os.environ.get("DB_USER")
-    db_password = os.environ.get("DB_PASSWORD")
-    db_name = os.environ.get("DB_NAME")
-    if not db_user or not db_password or not db_name:
-        raise RuntimeError(
-            "Database config is missing. Set DATABASE_URL or DB_USER/DB_PASSWORD/DB_NAME."
-        )
-
-    driver = os.environ.get("DB_DRIVER", "postgresql+psycopg")
-    password = quote_plus(db_password)
-
-    cloud_sql_connection_name = os.environ.get("CLOUD_SQL_CONNECTION_NAME")
-    if cloud_sql_connection_name:
-        socket_dir = os.environ.get("CLOUD_SQL_SOCKET_DIR", "/cloudsql")
-        socket_path = f"{socket_dir}/{cloud_sql_connection_name}"
-        return f"{driver}://{db_user}:{password}@/{db_name}?host={socket_path}"
-
-    host = os.environ.get("DB_HOST", "127.0.0.1")
-    port = os.environ.get("DB_PORT", "5432")
-    return f"{driver}://{db_user}:{password}@{host}:{port}/{db_name}"
+    raise RuntimeError(
+        "Database config is missing. Set DB_USER/DB_PASSWORD/DB_NAME or DATABASE_URL."
+    )
 
 
 @lru_cache(maxsize=1)
