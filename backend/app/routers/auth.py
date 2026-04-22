@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.db_auth import get_db
 from app.models_auth import LocalAuthUser
@@ -81,51 +82,73 @@ class AuthResponse(BaseModel):
 
 @router.post("/signup", response_model=AuthResponse, status_code=201)
 def signup(payload: SignupRequest, db: Session = Depends(get_db)):
-    existing_user = db.execute(
-        select(LocalAuthUser).where(
-            or_(
-                func.lower(LocalAuthUser.username) == payload.username.lower(),
-                func.lower(LocalAuthUser.email) == payload.email.lower(),
+    try:
+        existing_user = db.execute(
+            select(LocalAuthUser).where(
+                or_(
+                    func.lower(LocalAuthUser.username) == payload.username.lower(),
+                    func.lower(LocalAuthUser.email) == payload.email.lower(),
+                )
             )
+        ).scalar_one_or_none()
+        if existing_user is not None:
+            raise HTTPException(status_code=409, detail="Username or email is already registered.")
+
+        new_user = LocalAuthUser(
+            username=payload.username,
+            email=payload.email,
+            password_hash=hash_password(payload.password),
         )
-    ).scalar_one_or_none()
-    if existing_user is not None:
-        raise HTTPException(status_code=409, detail="Username or email is already registered.")
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
 
-    new_user = LocalAuthUser(
-        username=payload.username,
-        email=payload.email,
-        password_hash=hash_password(payload.password),
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-
-    return AuthResponse(
-        message="Signup successful.",
-        user=UserView(
-            id=new_user.id,
-            username=new_user.username,
-            email=new_user.email,
-            created_at=new_user.created_at,
-        ),
-    )
+        return AuthResponse(
+            message="Signup successful.",
+            user=UserView(
+                id=new_user.id,
+                username=new_user.username,
+                email=new_user.email,
+                created_at=new_user.created_at,
+            ),
+        )
+    except HTTPException:
+        raise
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database unavailable for signup. Verify DB_USER/DB_PASSWORD/DB_NAME "
+                "or DATABASE_URL and ensure Cloud SQL proxy is running."
+            ),
+        )
 
 
 @router.post("/login", response_model=AuthResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user = db.execute(
-        select(LocalAuthUser).where(func.lower(LocalAuthUser.username) == payload.username.lower())
-    ).scalar_one_or_none()
-    if user is None or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    try:
+        user = db.execute(
+            select(LocalAuthUser).where(func.lower(LocalAuthUser.username) == payload.username.lower())
+        ).scalar_one_or_none()
+        if user is None or not verify_password(payload.password, user.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid username or password.")
 
-    return AuthResponse(
-        message="Login successful.",
-        user=UserView(
-            id=user.id,
-            username=user.username,
-            email=user.email,
-            created_at=user.created_at,
-        ),
-    )
+        return AuthResponse(
+            message="Login successful.",
+            user=UserView(
+                id=user.id,
+                username=user.username,
+                email=user.email,
+                created_at=user.created_at,
+            ),
+        )
+    except HTTPException:
+        raise
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database unavailable for login. Verify DB_USER/DB_PASSWORD/DB_NAME "
+                "or DATABASE_URL and ensure Cloud SQL proxy is running."
+            ),
+        )

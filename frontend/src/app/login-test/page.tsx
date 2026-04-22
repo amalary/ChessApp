@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useMemo, useState, useSyncExternalStore } from "react";
+import React, { useState, useSyncExternalStore } from "react";
 import { Castle } from "lucide-react";
 import SolveTestClient from "../solve-test/solve-test-client";
 
 function subscribe() {
   return () => {};
 }
+
+const AUTH_REQUEST_TIMEOUT_MS = 15000;
 
 type AuthMode = "login" | "signup";
 
@@ -19,6 +21,12 @@ type AuthApiResponse = {
 };
 
 function parseMessage(data: AuthApiResponse, fallback: string): string {
+  if (Array.isArray(data.detail) && data.detail.length > 0) {
+    const first = data.detail[0] as { msg?: unknown };
+    if (typeof first?.msg === "string" && first.msg.trim()) {
+      return first.msg.trim();
+    }
+  }
   if (typeof data.detail === "string" && data.detail.trim()) {
     return data.detail.trim();
   }
@@ -30,10 +38,6 @@ function parseMessage(data: AuthApiResponse, fallback: string): string {
 
 export default function LoginTestPage() {
   const mounted = useSyncExternalStore(subscribe, () => true, () => false);
-  const backendUrl = useMemo(
-    () => process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:8010",
-    [],
-  );
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
@@ -71,17 +75,25 @@ export default function LoginTestPage() {
     setIsSubmitting(true);
 
     try {
-      const endpoint = authMode === "signup" ? "/auth/signup" : "/auth/login";
+      const endpoint =
+        authMode === "signup" ? "/api/local-auth/signup" : "/api/local-auth/login";
       const payload =
         authMode === "signup"
           ? { username, email, password }
           : { username, password };
 
-      const response = await fetch(`${backendUrl}${endpoint}`, {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(
+        () => controller.abort(),
+        AUTH_REQUEST_TIMEOUT_MS,
+      );
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
+      window.clearTimeout(timeoutId);
 
       let data: AuthApiResponse = {};
       try {
@@ -102,7 +114,12 @@ export default function LoginTestPage() {
       setStatusMessage(apiMessage);
       setIsLoggedIn(true);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Network error";
+      const raw = error instanceof Error ? error.message : "Network error";
+      const message = raw.toLowerCase().includes("abort")
+        ? "Login request timed out. Backend is likely down or blocked. Please retry after confirming backend/proxy are running."
+        : raw.toLowerCase().includes("failed to fetch")
+        ? "Unable to reach auth service. Confirm frontend is running on localhost:3001 and backend is running on 127.0.0.1:8010."
+        : raw;
       setErrorMessage(message);
     } finally {
       setIsSubmitting(false);

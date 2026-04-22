@@ -2,7 +2,15 @@
 
 import React, { useEffect, useId, useMemo, useState } from 'react';
 import { useTheme } from 'next-themes';
-import { Crown } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import Image from 'next/image';
+import { Crown, LayoutDashboard } from 'lucide-react';
+import {
+  addPuzzleSubmission,
+  estimatePuzzleElo,
+  getPuzzleSubmissionUpdateEventName,
+  getUnseenPuzzleSubmissionCount,
+} from '@/lib/puzzle-submissions';
 
 type SolveResponse = {
   solution_line?: unknown;
@@ -122,8 +130,25 @@ function extractSolutionLines(data: SolveResponse): string[] {
   return ['No mate solution returned.'];
 }
 
+function isSuccessfulSolve(data: SolveResponse): boolean {
+  if (data.mate_found === true) {
+    return true;
+  }
+
+  if (typeof data.solution_line === 'string' && data.solution_line.trim()) {
+    return true;
+  }
+
+  if (Array.isArray(data.moves_san)) {
+    return data.moves_san.some((move) => typeof move === 'string' && move.trim().length > 0);
+  }
+
+  return false;
+}
+
 export default function SolveTestClient() {
   const { theme, setTheme, resolvedTheme } = useTheme();
+  const router = useRouter();
   const isDark = theme === 'dark' || (theme === 'system' && resolvedTheme === 'dark');
   const fileInputId = useId();
 
@@ -136,6 +161,8 @@ export default function SolveTestClient() {
   const [loading, setLoading] = useState(false);
 
   const [queenIsWhite, setQueenIsWhite] = useState(true);
+  const [isTransitioningToDashboard, setIsTransitioningToDashboard] = useState(false);
+  const [unseenSubmissionCount, setUnseenSubmissionCount] = useState(0);
 
   useEffect(() => {
     if (!file) {
@@ -147,6 +174,22 @@ export default function SolveTestClient() {
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
+
+  useEffect(() => {
+    const syncUnseenCount = () => {
+      setUnseenSubmissionCount(getUnseenPuzzleSubmissionCount());
+    };
+
+    const updateEventName = getPuzzleSubmissionUpdateEventName();
+    syncUnseenCount();
+    window.addEventListener('storage', syncUnseenCount);
+    window.addEventListener(updateEventName, syncUnseenCount);
+
+    return () => {
+      window.removeEventListener('storage', syncUnseenCount);
+      window.removeEventListener(updateEventName, syncUnseenCount);
+    };
+  }, []);
 
   const backendUrl = useMemo(() => {
     return process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://127.0.0.1:8010';
@@ -176,6 +219,7 @@ export default function SolveTestClient() {
     const formData = new FormData();
     formData.append('image', file);
     formData.append('expected_side_to_move', queenIsWhite ? 'white' : 'black');
+    const solveStartedAt = performance.now();
 
     setLoading(true);
 
@@ -207,8 +251,29 @@ export default function SolveTestClient() {
         setError(msg);
       } else {
         const lines = extractSolutionLines(data);
-        setSolutionLines(lines.length ? lines : ['(No solution returned)']);
-        setSolveMeta(extractSolveMeta(data));
+        const normalizedLines = lines.length ? lines : ['(No solution returned)'];
+        const meta = extractSolveMeta(data);
+        setSolutionLines(normalizedLines);
+        setSolveMeta(meta);
+
+        if (isSuccessfulSolve(data)) {
+          const solveTimeMs = Math.max(0, Math.round(performance.now() - solveStartedAt));
+          const puzzleElo = estimatePuzzleElo({
+            solveTimeMs,
+            mateIn: meta.mateIn,
+            confidence: meta.confidence,
+            attemptsUsed: meta.attemptsUsed,
+            solutionLines: normalizedLines,
+          });
+          addPuzzleSubmission({
+            fileName: file.name,
+            expectedSideToMove: queenIsWhite ? 'white' : 'black',
+            solveTimeMs,
+            puzzleElo,
+            positionCheck: meta,
+            solutionLines: normalizedLines,
+          });
+        }
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Network error';
@@ -222,6 +287,16 @@ export default function SolveTestClient() {
     setQueenIsWhite((prev) => !prev);
   };
 
+  const handleDashboardClick = () => {
+    if (loading || isTransitioningToDashboard) {
+      return;
+    }
+    setIsTransitioningToDashboard(true);
+    window.setTimeout(() => {
+      router.push('/dashboard');
+    }, 280);
+  };
+
   const pressable =
     'transition-all duration-150 ease-out select-none ' +
     'shadow-[10px_10px_20px_rgba(0,0,0,0.12),-10px_-10px_20px_rgba(255,255,255,0.75)] ' +
@@ -232,11 +307,17 @@ export default function SolveTestClient() {
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/10';
 
   const queenStroke = isDark ? '#e2e8f0' : '#111827';
-  const controlsLocked = loading;
+  const controlsLocked = loading || isTransitioningToDashboard;
 
   return (
     <main className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-[520px]">
+      <div
+        className={`w-full max-w-[520px] transition-all duration-300 ${
+          isTransitioningToDashboard
+            ? 'opacity-0 scale-[0.98] translate-y-1'
+            : 'opacity-100 scale-100 translate-y-0'
+        }`}
+      >
         <div className="neumo-surface p-8 md:p-10 relative">
           <div className="absolute top-4 left-4">
             <button
@@ -244,9 +325,7 @@ export default function SolveTestClient() {
               onClick={handleQueenClick}
               disabled={controlsLocked}
               className={`neumo-pill h-12 w-12 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 ${pressable}`}
-              aria-label={
-                `Side to move: ${queenIsWhite ? 'white' : 'black'}. Click to toggle.`
-              }
+              aria-label={`Side to move: ${queenIsWhite ? 'white' : 'black'}. Click to toggle.`}
               title={`Side to move: ${queenIsWhite ? 'white' : 'black'}`}
             >
               <Crown
@@ -258,11 +337,31 @@ export default function SolveTestClient() {
             </button>
           </div>
 
-          <div className="absolute top-4 right-4">
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleDashboardClick}
+              disabled={controlsLocked}
+              className={`relative neumo-pill px-3 py-2 text-sm flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed ${pressable}`}
+              aria-label="Open dashboard"
+            >
+              <LayoutDashboard className="h-4 w-4" />
+              Dashboard
+              {unseenSubmissionCount > 0 && (
+                <span
+                  className="absolute -top-2 -right-2 min-w-5 h-5 px-1 rounded-full bg-red-600 text-white text-[11px] leading-none font-semibold flex items-center justify-center shadow-[0_2px_8px_rgba(220,38,38,0.45)]"
+                  aria-label={`${unseenSubmissionCount} new solved submissions`}
+                  title={`${unseenSubmissionCount} new solved submissions`}
+                >
+                  {unseenSubmissionCount > 99 ? '99+' : unseenSubmissionCount}
+                </span>
+              )}
+            </button>
             <button
               type="button"
               onClick={() => setTheme(isDark ? 'light' : 'dark')}
-              className={`neumo-pill px-4 py-2 text-sm ${pressable}`}
+              disabled={controlsLocked}
+              className={`neumo-pill px-4 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed ${pressable}`}
               aria-label="Toggle theme"
             >
               {isDark ? 'Dark' : 'Light'}
@@ -280,7 +379,7 @@ export default function SolveTestClient() {
             />
 
             {!file && (
-              <div className="flex justify-center">
+              <div className="mt-16 md:mt-14 flex justify-center">
                 <label
                   htmlFor={controlsLocked ? undefined : fileInputId}
                   onClick={controlsLocked ? (e) => e.preventDefault() : undefined}
@@ -304,7 +403,14 @@ export default function SolveTestClient() {
                   <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center relative">
                     {previewUrl ? (
                       <>
-                        <img src={previewUrl} alt="Puzzle preview" className="w-full h-full object-cover" />
+                        <Image
+                          src={previewUrl}
+                          alt="Puzzle preview"
+                          fill
+                          unoptimized
+                          sizes="260px"
+                          className="w-full h-full object-cover"
+                        />
                         <div
                           className={`absolute inset-0 flex items-center justify-center bg-black/35 opacity-0 transition-opacity duration-150 ${controlsLocked ? '' : 'group-hover:opacity-100'}`}
                         >
@@ -317,7 +423,9 @@ export default function SolveTestClient() {
                       <div
                         className={`w-full h-full neumo-inset flex items-center justify-center transition-all duration-150 ${controlsLocked ? '' : 'group-hover:brightness-[1.03] group-hover:scale-[1.01]'}`}
                       >
-                        <span className="text-sm opacity-60 px-6 text-center">Upload a puzzle image</span>
+                        <span className="text-sm opacity-60 px-6 text-center">
+                          Upload a puzzle image
+                        </span>
                       </div>
                     )}
                   </div>
