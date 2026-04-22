@@ -1,0 +1,113 @@
+{
+  "summary": {
+    "total_images": 10,
+    "http_200": 8,
+    "has_solution_moves": 5,
+    "has_any_solution_output": 8,
+    "no_solution_output": 0,
+    "http_error": 2,
+    "request_exception": 0
+  },
+  "results": [
+    {
+      "image": "C:\\Users\\admin\\Desktop\\Set_2_Mate_In_1's\\1.png",
+      "status": 200,
+      "has_solution_moves": false,
+      "has_any_solution_output": true,
+      "mate_found": false,
+      "mate_in": null,
+      "moves_count": 0,
+      "error": null
+    },
+    {
+      "image": "C:\\Users\\admin\\Desktop\\Set_2_Mate_In_1's\\10.png",
+      "status": 200,
+      "has_solution_moves": true,
+      "has_any_solution_output": true,
+      "mate_found": true,
+      "mate_in": 1,
+      "moves_count": 1,
+      "error": null
+    },
+    {
+      "image": "C:\\Users\\admin\\Desktop\\Set_2_Mate_In_1's\\2.png",
+      "status": 422,
+      "has_solution_moves": false,
+      "has_any_solution_output": false,
+      "mate_found": null,
+      "mate_in": null,
+      "moves_count": 0,
+      "error": "Invalid chess position detected"
+    },
+    {
+      "image": "C:\\Users\\admin\\Desktop\\Set_2_Mate_In_1's\\3.png",
+      "status": 422,
+      "has_solution_moves": false,
+      "has_any_solution_output": false,
+      "mate_found": null,
+      "mate_in": null,
+      "moves_count": 0,
+      "error": "Invalid chess position detected"
+    },
+    {
+      "image": "C:\\Users\\admin\\Desktop\\Set_2_Mate_In_1's\\4.png",
+      "status": 200,
+      "has_solution_moves": true,
+      "has_any_solution_output": true,
+      "mate_found": true,
+      "mate_in": 1,
+      "moves_count": 1,
+      "error": null
+    },
+    {
+      "image": "C:\\Users\\admin\\Desktop\\Set_2_Mate_In_1's\\5.png",
+      "status": 200,
+      "has_solution_moves": true,
+      "has_any_solution_output": true,
+      "mate_found": true,
+      "mate_in": 1,
+      "moves_count": 1,
+      "error": null
+    },
+    {
+      "image": "C:\\Users\\admin\\Desktop\\Set_2_Mate_In_1's\\6.png",
+      "status": 200,
+      "has_solution_moves": true,
+      "has_any_solution_output": true,
+      "mate_found": true,
+      "mate_in": 1,
+      "moves_count": 1,
+      "error": null
+    },
+    {
+      "image": "C:\\Users\\admin\\Desktop\\Set_2_Mate_In_1's\\7.png",
+      "status": 200,
+      "has_solution_moves": true,
+      "has_any_solution_output": true,
+      "mate_found": true,
+      "mate_in": 1,
+      "moves_count": 1,
+      "error": null
+    },
+    {
+      "image": "C:\\Users\\admin\\Desktop\\Set_2_Mate_In_1's\\8.png",
+      "status": 200,
+      "has_solution_moves": false,
+      "has_any_solution_output": true,
+      "mate_found": false,
+      "mate_in": null,
+      "moves_count": 0,
+      "error": null
+    },
+    {
+      "image": "C:\\Users\\admin\\Desktop\\Set_2_Mate_In_1's\\9.png",
+      "status": 200,
+      "has_solution_moves": false,
+      "has_any_solution_output": true,
+      "mate_found": false,
+      "mate_in": null,
+      "moves_count": 0,
+      "error": null
+    }
+  ]
+}

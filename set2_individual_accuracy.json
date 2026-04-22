@@ -1,0 +1,100 @@
+{
+  "summary": {
+    "total": 10,
+    "successes": 2,
+    "failures": 8,
+    "accuracy_percent": 20.0
+  },
+  "results": [
+    {
+      "image": "1.png",
+      "status": 200,
+      "mate_found": false,
+      "mate_in": null,
+      "moves_count": 0,
+      "success": false,
+      "failure_reason": "No mating move returned"
+    },
+    {
+      "image": "10.png",
+      "status": 200,
+      "mate_found": true,
+      "mate_in": 1,
+      "moves_count": 1,
+      "success": true,
+      "failure_reason": null
+    },
+    {
+      "image": "2.png",
+      "status": 422,
+      "mate_found": null,
+      "mate_in": null,
+      "moves_count": 0,
+      "success": false,
+      "failure_reason": "Invalid chess position detected"
+    },
+    {
+      "image": "3.png",
+      "status": 422,
+      "mate_found": null,
+      "mate_in": null,
+      "moves_count": 0,
+      "success": false,
+      "failure_reason": "Invalid chess position detected"
+    },
+    {
+      "image": "4.png",
+      "status": 200,
+      "mate_found": true,
+      "mate_in": 1,
+      "moves_count": 1,
+      "success": true,
+      "failure_reason": null
+    },
+    {
+      "image": "5.png",
+      "status": 200,
+      "mate_found": false,
+      "mate_in": null,
+      "moves_count": 0,
+      "success": false,
+      "failure_reason": "No mating move returned"
+    },
+    {
+      "image": "6.png",
+      "status": 422,
+      "mate_found": null,
+      "mate_in": null,
+      "moves_count": 0,
+      "success": false,
+      "failure_reason": "Invalid chess position detected"
+    },
+    {
+      "image": "7.png",
+      "status": 200,
+      "mate_found": false,
+      "mate_in": null,
+      "moves_count": 0,
+      "success": false,
+      "failure_reason": "No mating move returned"
+    },
+    {
+      "image": "8.png",
+      "status": 200,
+      "mate_found": false,
+      "mate_in": null,
+      "moves_count": 0,
+      "success": false,
+      "failure_reason": "No mating move returned"
+    },
+    {
+      "image": "9.png",
+      "status": 200,
+      "mate_found": false,
+      "mate_in": null,
+      "moves_count": 0,
+      "success": false,
+      "failure_reason": "No mating move returned"
+    }
+  ]
+}
