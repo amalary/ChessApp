@@ -13,6 +13,7 @@ export type PuzzleSubmissionRecord = {
   expectedSideToMove: 'white' | 'black';
   solveTimeMs?: number | null;
   puzzleElo?: number | null;
+  originalPuzzleImageDataUrl?: string | null;
   positionCheck: SubmissionPositionCheck;
   solutionLines: string[];
 };
@@ -74,6 +75,9 @@ function isSubmissionRecord(value: unknown): value is PuzzleSubmissionRecord {
         Number.isFinite(candidate.puzzleElo) &&
         candidate.puzzleElo >= 100 &&
         candidate.puzzleElo <= 4000)) &&
+    (candidate.originalPuzzleImageDataUrl === undefined ||
+      candidate.originalPuzzleImageDataUrl === null ||
+      typeof candidate.originalPuzzleImageDataUrl === 'string') &&
     Array.isArray(candidate.solutionLines) &&
     candidate.solutionLines.every((line) => typeof line === 'string') &&
     isPositionCheck(candidate.positionCheck)
@@ -210,7 +214,32 @@ export function addPuzzleSubmission(
   };
 
   const next = [nextRecord, ...existing].slice(0, MAX_STORED_SUBMISSIONS);
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  let persisted = next;
+
+  while (persisted.length > 0) {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+      emitUpdateEvent();
+      return persisted;
+    } catch {
+      const oldestIndex = persisted.length - 1;
+      const oldest = persisted[oldestIndex];
+      if (oldest?.originalPuzzleImageDataUrl) {
+        persisted = [
+          ...persisted.slice(0, oldestIndex),
+          { ...oldest, originalPuzzleImageDataUrl: null },
+        ];
+        continue;
+      }
+      persisted = persisted.slice(0, oldestIndex);
+    }
+  }
+
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Ignore storage failures; submissions will be rebuilt from new solves.
+  }
   emitUpdateEvent();
-  return next;
+  return [];
 }
