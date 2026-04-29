@@ -25,4 +25,3 @@ def extract_square_images(board_image: Image.Image) -> SquareExtractionResult:
             y0 = rank_idx * sq
             out[f"{file}{rank}"] = board_image.crop((x0, y0, x0 + sq, y0 + sq))
     return SquareExtractionResult(square_images=out, board_size=board_image.width)
-

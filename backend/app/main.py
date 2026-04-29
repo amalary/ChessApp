@@ -131,6 +131,7 @@ def _candidate_score(
             pass
     return score
 
+
 app = FastAPI()
 
 origins = [
@@ -188,10 +189,14 @@ async def solve(
         try:
             board = chess.Board(fen)
         except Exception:
-            raise HTTPException(status_code=422, detail="Invalid FEN returned from Gemini")
+            raise HTTPException(
+                status_code=422, detail="Invalid FEN returned from Gemini"
+            )
 
         if not board.is_valid():
-            raise HTTPException(status_code=422, detail="Invalid chess position detected")
+            raise HTTPException(
+                status_code=422, detail="Invalid chess position detected"
+            )
 
         # 3) Run Stockfish
         stockfish_path = (
@@ -217,11 +222,15 @@ async def solve(
         fallback_confidence_threshold = max(
             0.0, min(1.0, _env_float("SOLVE_FALLBACK_CONFIDENCE", 0.90))
         )
-        should_run_fallback = (result is None) or (float(confidence) < fallback_confidence_threshold)
+        should_run_fallback = (result is None) or (
+            float(confidence) < fallback_confidence_threshold
+        )
 
         if should_run_fallback:
             fallback_fens = _build_fallback_fens(fen, expected_side)
-            fallback_think_time_s = max(0.6, _env_float("SOLVE_FALLBACK_THINK_TIME_S", 2.5))
+            fallback_think_time_s = max(
+                0.6, _env_float("SOLVE_FALLBACK_THINK_TIME_S", 2.5)
+            )
             fallback_max_depth = max(10, _env_int("SOLVE_FALLBACK_MAX_DEPTH", 24))
 
             best_fen = fen
@@ -258,7 +267,9 @@ async def solve(
 
             fen = best_fen
             result = best_result
-            gemini_result["side_to_move"] = "white" if chess.Board(fen).turn else "black"
+            gemini_result["side_to_move"] = (
+                "white" if chess.Board(fen).turn else "black"
+            )
 
         # 4) Response
         return {

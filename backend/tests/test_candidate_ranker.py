@@ -37,6 +37,21 @@ class CandidateRankerTests(unittest.TestCase):
         ranked = rank_candidates([c1, c2], mate_by_fen=mate_by_fen, side_hint="white")
         self.assertEqual(ranked[0].candidate.fen, c2.fen)
 
+    def test_empty_side_to_move_does_not_crash(self) -> None:
+        candidate = CandidateBoard(
+            fen="4k3/8/8/8/8/8/8/4K3 w - - 0 1",
+            source="manual",
+            board_map={},
+            side_to_move="",
+            repair_applied=False,
+            validation=validate_fen("4k3/8/8/8/8/8/8/4K3 w - - 0 1"),
+            confidence=0.6,
+            uncertain_squares=[],
+        )
+        ranked = rank_candidates([candidate], mate_by_fen={candidate.fen: None}, side_hint="white")
+        self.assertEqual(len(ranked), 1)
+        self.assertEqual(ranked[0].candidate.fen, candidate.fen)
+
 
 if __name__ == "__main__":
     unittest.main()

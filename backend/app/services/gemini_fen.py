@@ -1,7 +1,6 @@
 import base64
 import json
 import os
-from collections import Counter
 from io import BytesIO
 from typing import Any, Dict, Iterable
 
@@ -55,7 +54,9 @@ def _guess_mime(filename: str | None) -> str:
     return "image/png"
 
 
-def _preprocess_image_variants(image_bytes: bytes, filename: str | None) -> list[tuple[bytes, str]]:
+def _preprocess_image_variants(
+    image_bytes: bytes, filename: str | None
+) -> list[tuple[bytes, str]]:
     variants: list[tuple[bytes, str]] = [(image_bytes, _guess_mime(filename))]
     try:
         img = Image.open(BytesIO(image_bytes)).convert("RGB")
@@ -315,7 +316,9 @@ def fen_from_image_bytes(
     valid_candidates: list[dict[str, Any]] = []
     correction_message: str | None = None
     last_error = "No response from Gemini."
-    early_exit_confidence = max(0.0, min(1.0, _env_float("GEMINI_EARLY_EXIT_CONFIDENCE", 0.92)))
+    early_exit_confidence = max(
+        0.0, min(1.0, _env_float("GEMINI_EARLY_EXIT_CONFIDENCE", 0.92))
+    )
     min_attempts = max(1, _env_int("GEMINI_MIN_ATTEMPTS", 3))
     max_attempts = max(1, _env_int("GEMINI_TRANSCRIBE_ATTEMPTS", attempts))
     consensus_exit_votes = max(2, _env_int("GEMINI_CONSENSUS_EXIT_VOTES", 3))
@@ -336,7 +339,9 @@ def fen_from_image_bytes(
 
             side_matches_expected = (expected is None) or (side == expected)
             if expected and not side_matches_expected:
-                last_error = f"Gemini returned side_to_move={side}, expected {expected}."
+                last_error = (
+                    f"Gemini returned side_to_move={side}, expected {expected}."
+                )
                 correction_message = (
                     f"Use side_to_move='{ 'white' if expected == 'w' else 'black' }'. "
                     "Re-evaluate board_map carefully, but still return your best board_map."
@@ -370,9 +375,9 @@ def fen_from_image_bytes(
 
             # Fast path: once we have enough attempts and repeated agreement at high confidence.
             fen_count = sum(1 for item in valid_candidates if item["fen"] == fen)
-            fen_avg_conf = sum(item["confidence"] for item in valid_candidates if item["fen"] == fen) / max(
-                1, fen_count
-            )
+            fen_avg_conf = sum(
+                item["confidence"] for item in valid_candidates if item["fen"] == fen
+            ) / max(1, fen_count)
             if (
                 (idx + 1) >= min_attempts
                 and fen_count >= consensus_exit_votes

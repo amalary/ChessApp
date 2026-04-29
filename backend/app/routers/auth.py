@@ -25,9 +25,13 @@ class SignupRequest(BaseModel):
         normalized = value.strip()
         if len(normalized) < 3 or len(normalized) > 32:
             raise ValueError("Username must be between 3 and 32 characters.")
-        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        allowed = set(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+        )
         if any(ch not in allowed for ch in normalized):
-            raise ValueError("Username can only use letters, numbers, dot, underscore, and dash.")
+            raise ValueError(
+                "Username can only use letters, numbers, dot, underscore, and dash."
+            )
         return normalized
 
     @field_validator("email")
@@ -43,8 +47,12 @@ class SignupRequest(BaseModel):
     def validate_password(cls, value: str) -> str:
         if len(value) < 8:
             raise ValueError("Password must be at least 8 characters.")
-        if not any(ch.isalpha() for ch in value) or not any(ch.isdigit() for ch in value):
-            raise ValueError("Password must include at least one letter and one number.")
+        if not any(ch.isalpha() for ch in value) or not any(
+            ch.isdigit() for ch in value
+        ):
+            raise ValueError(
+                "Password must include at least one letter and one number."
+            )
         return value
 
 
@@ -92,7 +100,9 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
             )
         ).scalar_one_or_none()
         if existing_user is not None:
-            raise HTTPException(status_code=409, detail="Username or email is already registered.")
+            raise HTTPException(
+                status_code=409, detail="Username or email is already registered."
+            )
 
         new_user = LocalAuthUser(
             username=payload.username,
@@ -128,7 +138,9 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     try:
         user = db.execute(
-            select(LocalAuthUser).where(func.lower(LocalAuthUser.username) == payload.username.lower())
+            select(LocalAuthUser).where(
+                func.lower(LocalAuthUser.username) == payload.username.lower()
+            )
         ).scalar_one_or_none()
         if user is None or not verify_password(payload.password, user.password_hash):
             raise HTTPException(status_code=401, detail="Invalid username or password.")

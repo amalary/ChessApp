@@ -9,7 +9,7 @@ from typing import Iterable, List, Optional
 from app.services.board_detect import detect_and_normalize_board
 from app.services.board_preprocess import preprocess_image_bytes
 from app.services.board_transcription import transcribe_board_from_squares
-from app.services.board_validate import CandidateBoard, build_candidates
+from app.services.board_validate import build_candidates
 from app.services.candidate_ranker import rank_candidates
 from app.services.gemini_assist import extract_puzzle_hints
 from app.services.mate_solver import EngineCrashedError, MateLine, find_mate_in_1_to_3
@@ -61,7 +61,12 @@ def _candidate_stockfish_paths() -> list[str]:
         / "stockfish-windows-x86-64-avx2.exe"
     )
     candidates: list[str] = []
-    for candidate in (configured, which_stockfish, str(repo_stockfish), "/usr/games/stockfish"):
+    for candidate in (
+        configured,
+        which_stockfish,
+        str(repo_stockfish),
+        "/usr/games/stockfish",
+    ):
         if not candidate:
             continue
         if candidate not in candidates:
@@ -148,7 +153,11 @@ def run_solve_pipeline(
     # 5) optional Gemini helper for puzzle text hints only
     hint = extract_puzzle_hints(image_bytes=image_bytes, filename=filename)
     side_hint = hint.get("side_to_move", "unknown")
-    requested_side = expected_side_to_move if expected_side_to_move in {"white", "black"} else "white"
+    requested_side = (
+        expected_side_to_move
+        if expected_side_to_move in {"white", "black"}
+        else "white"
+    )
     side_options = [requested_side]
     if side_hint in {"white", "black"} and side_hint not in side_options:
         side_options.append(side_hint)
@@ -165,7 +174,9 @@ def run_solve_pipeline(
     )
     valid_candidates = [c for c in candidates if c.validation.passed]
     if not valid_candidates:
-        raise ValueError("No valid candidate positions after transcription, validation, and repair.")
+        raise ValueError(
+            "No valid candidate positions after transcription, validation, and repair."
+        )
 
     # 7) solve with Stockfish only (mate in 1..3)
     think_time_s = max(0.5, _env_float("MATE_THINK_TIME_S", 3.0))
@@ -191,12 +202,16 @@ def run_solve_pipeline(
         engine_errors.extend(errs)
 
     # 8) rank candidates
-    ranked = rank_candidates(valid_candidates, mate_by_fen=mate_by_fen, side_hint=side_hint)
+    ranked = rank_candidates(
+        valid_candidates, mate_by_fen=mate_by_fen, side_hint=side_hint
+    )
     chosen = ranked[0]
 
     if expected_mate_in is not None:
         if chosen.mate_line is None:
-            raise ValueError(f"Expected mate in {expected_mate_in}, but no forced mate found.")
+            raise ValueError(
+                f"Expected mate in {expected_mate_in}, but no forced mate found."
+            )
         if chosen.mate_line.mate_in != expected_mate_in:
             raise ValueError(
                 f"Expected mate in {expected_mate_in}, but found mate in {chosen.mate_line.mate_in}."
@@ -232,9 +247,10 @@ def run_solve_pipeline(
                 "repair_applied": c.repair_applied,
                 "transcription_confidence": c.confidence,
                 "mate_found": mate_by_fen.get(c.fen) is not None,
-                "mate_in": mate_by_fen[c.fen].mate_in if mate_by_fen.get(c.fen) else None,
+                "mate_in": (
+                    mate_by_fen[c.fen].mate_in if mate_by_fen.get(c.fen) else None
+                ),
             }
             for c in valid_candidates
         ],
     )
-

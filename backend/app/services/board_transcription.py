@@ -16,12 +16,12 @@ PIECE_SYMBOLS = {
     "B": "\u2657",
     "N": "\u2658",
     "P": "\u2659",
-    "k": "\u265A",
-    "q": "\u265B",
-    "r": "\u265C",
-    "b": "\u265D",
-    "n": "\u265E",
-    "p": "\u265F",
+    "k": "\u265a",
+    "q": "\u265b",
+    "r": "\u265c",
+    "b": "\u265d",
+    "n": "\u265e",
+    "p": "\u265f",
 }
 
 
@@ -132,7 +132,9 @@ def _tile_mask(tile: Image.Image) -> Image.Image:
     return mask.filter(ImageFilter.MedianFilter(size=3))
 
 
-def transcribe_board_from_squares(square_images: Dict[str, Image.Image]) -> TranscriptionResult:
+def transcribe_board_from_squares(
+    square_images: Dict[str, Image.Image],
+) -> TranscriptionResult:
     board_map: Dict[str, str] = {sq: "." for sq in SQUARES}
     predictions: Dict[str, SquarePrediction] = {}
     uncertain: List[str] = []
@@ -144,7 +146,9 @@ def transcribe_board_from_squares(square_images: Dict[str, Image.Image]) -> Tran
         fg_ratio = _foreground_ratio(mask)
 
         if fg_ratio < 0.055:
-            pred = SquarePrediction(piece=".", confidence=0.92, alternatives=[(".", 0.92)])
+            pred = SquarePrediction(
+                piece=".", confidence=0.92, alternatives=[(".", 0.92)]
+            )
             predictions[square] = pred
             board_map[square] = "."
             conf_values.append(pred.confidence)
@@ -165,7 +169,9 @@ def transcribe_board_from_squares(square_images: Dict[str, Image.Image]) -> Tran
         scored.sort(key=lambda x: x[1], reverse=True)
 
         if not scored:
-            pred = SquarePrediction(piece=".", confidence=0.15, alternatives=[(".", 0.15)])
+            pred = SquarePrediction(
+                piece=".", confidence=0.15, alternatives=[(".", 0.15)]
+            )
             predictions[square] = pred
             board_map[square] = "."
             uncertain.append(square)
@@ -193,4 +199,3 @@ def transcribe_board_from_squares(square_images: Dict[str, Image.Image]) -> Tran
         confidence=max(0.0, min(1.0, avg_conf)),
         notes="square_template_baseline",
     )
-

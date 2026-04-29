@@ -12,7 +12,9 @@ class BoardDetectionResult:
     perspective_corrected: bool
 
 
-def detect_and_normalize_board(image: Image.Image, out_size: int = 1024) -> BoardDetectionResult:
+def detect_and_normalize_board(
+    image: Image.Image, out_size: int = 1024
+) -> BoardDetectionResult:
     """
     Baseline board detector:
     - Finds non-background bounding box.
@@ -40,4 +42,3 @@ def detect_and_normalize_board(image: Image.Image, out_size: int = 1024) -> Boar
         detection_confidence=conf,
         perspective_corrected=False,  # placeholder for future homography stage
     )
-

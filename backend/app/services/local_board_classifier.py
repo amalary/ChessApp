@@ -4,7 +4,16 @@ from dataclasses import dataclass
 from io import BytesIO
 from typing import Dict, List, Tuple
 
-from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps, ImageStat
+from PIL import (
+    Image,
+    ImageChops,
+    ImageDraw,
+    ImageEnhance,
+    ImageFilter,
+    ImageFont,
+    ImageOps,
+    ImageStat,
+)
 
 FILES = "abcdefgh"
 RANKS = "87654321"
@@ -17,12 +26,12 @@ PIECE_SYMBOLS = {
     "B": "\u2657",
     "N": "\u2658",
     "P": "\u2659",
-    "k": "\u265A",
-    "q": "\u265B",
-    "r": "\u265C",
-    "b": "\u265D",
-    "n": "\u265E",
-    "p": "\u265F",
+    "k": "\u265a",
+    "q": "\u265b",
+    "r": "\u265c",
+    "b": "\u265d",
+    "n": "\u265e",
+    "p": "\u265f",
 }
 
 
@@ -128,7 +137,9 @@ def _estimate_background_tiles(tiles: Dict[str, Image.Image]) -> Dict[int, Image
     backgrounds: Dict[int, Image.Image] = {}
     for par in (0, 1):
         candidates = sorted(by_parity[par], key=lambda row: row[0])
-        backgrounds[par] = candidates[0][1] if candidates else Image.new("L", (128, 128), 200)
+        backgrounds[par] = (
+            candidates[0][1] if candidates else Image.new("L", (128, 128), 200)
+        )
     return backgrounds
 
 
@@ -178,7 +189,9 @@ def _iou(mask_a: Image.Image, mask_b: Image.Image) -> float:
     return inter / union
 
 
-def classify_board_map_from_image_bytes(image_bytes: bytes) -> LocalClassification | None:
+def classify_board_map_from_image_bytes(
+    image_bytes: bytes,
+) -> LocalClassification | None:
     try:
         img = Image.open(BytesIO(image_bytes)).convert("RGB")
     except Exception:

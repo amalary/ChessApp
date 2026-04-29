@@ -1,5 +1,6 @@
 import os
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
+
 
 # Only validate env vars when auth is actually used
 def _require_env(name: str) -> str:
@@ -8,10 +9,11 @@ def _require_env(name: str) -> str:
         raise RuntimeError(f"{name} must be set")
     return v
 
+
 def get_current_user():
     try:
-        domain = _require_env("AUTH0_DOMAIN")
-        audience = _require_env("AUTH0_AUDIENCE")
+        _require_env("AUTH0_DOMAIN")
+        _require_env("AUTH0_AUDIENCE")
     except RuntimeError as e:
         # Don't crash the whole app; fail only protected endpoints
         raise HTTPException(

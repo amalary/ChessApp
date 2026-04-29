@@ -107,4 +107,3 @@ def validate_fen(fen: str) -> ValidationResult:
         passed=passed,
         reasons=reasons,
     )
-

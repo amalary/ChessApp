@@ -7,7 +7,6 @@ from typing import Any, Dict
 
 from google import genai
 
-
 HINT_PROMPT = """
 Extract puzzle text hints from the image.
 Return ONLY JSON:
@@ -41,10 +40,17 @@ def _json_or_default(text: str) -> dict[str, Any]:
     return {"side_to_move": "unknown", "mate_in": None, "confidence": 0.0}
 
 
-def extract_puzzle_hints(image_bytes: bytes, filename: str | None = None) -> Dict[str, Any]:
+def extract_puzzle_hints(
+    image_bytes: bytes, filename: str | None = None
+) -> Dict[str, Any]:
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
-        return {"side_to_move": "unknown", "mate_in": None, "confidence": 0.0, "used": False}
+        return {
+            "side_to_move": "unknown",
+            "mate_in": None,
+            "confidence": 0.0,
+            "used": False,
+        }
 
     client = genai.Client(api_key=api_key)
     mime = _guess_mime(filename)
@@ -86,5 +92,9 @@ def extract_puzzle_hints(image_bytes: bytes, filename: str | None = None) -> Dic
             "used": True,
         }
     except Exception:
-        return {"side_to_move": "unknown", "mate_in": None, "confidence": 0.0, "used": False}
-
+        return {
+            "side_to_move": "unknown",
+            "mate_in": None,
+            "confidence": 0.0,
+            "used": False,
+        }
