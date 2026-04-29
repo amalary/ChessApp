@@ -1,11 +1,15 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useUser } from '@auth0/nextjs-auth0/client';
+import { useTheme } from 'next-themes';
 import { useRouter } from 'next/navigation';
 import {
   Activity,
   ArrowLeft,
   BarChart3,
+  ChevronDown,
+  ChevronUp,
   Download,
   LayoutDashboard,
   Puzzle,
@@ -18,6 +22,11 @@ import {
   readPuzzleSubmissions,
   type PuzzleSubmissionRecord,
 } from '@/lib/puzzle-submissions';
+import {
+  readScopedStorageValue,
+  resolveUserSettingsScope,
+  writeScopedStorageValue,
+} from '@/lib/dashboard-theme-settings';
 
 type NavItem = {
   label: string;
@@ -33,21 +42,48 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const RANGE_TABS = ['Today', 'Week', 'Month', 'Year'] as const;
+const ANALYTICS_THEMES = ['Forks', 'Pins', 'Back-Rank Mates', 'Sacrifices', 'Skewers'] as const;
+const ANALYTICS_BASELINE_ACCURACY: Record<(typeof ANALYTICS_THEMES)[number], number> = {
+  Forks: 85,
+  Pins: 60,
+  'Back-Rank Mates': 80,
+  Sacrifices: 45,
+  Skewers: 70,
+};
+const ANALYTICS_SECONDARY_SUBSECTIONS = [
+  'Solve Time vs Difficulty',
+  'Rating Progression',
+  'Accuracy by Difficulty',
+  'First-Move Accuracy',
+] as const;
+const ANALYTICS_RECENT_SOLVE_LIMIT = 60;
+const DIFFICULTY_ELO_BUCKET_SIZE = 200;
 const DAY_MS = 86400000;
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 const DEFAULT_DASHBOARD_ACCENT = '#7A94BF';
 const DEFAULT_DASHBOARD_SECONDARY = '#A58EB4';
+const DEFAULT_DASHBOARD_ACCENT_CHANNELS: [number, number, number] = [122, 148, 191];
 const DASHBOARD_ACCENT_STORAGE_KEY = 'chessapp.dashboard.accent';
 const DASHBOARD_SECONDARY_STORAGE_KEY = 'chessapp.dashboard.secondary';
 const DASHBOARD_GRADIENT_ENABLED_STORAGE_KEY = 'chessapp.dashboard.gradient.enabled';
 const DASHBOARD_GRADIENT_DIRECTION_STORAGE_KEY = 'chessapp.dashboard.gradient.direction';
+const DASHBOARD_THEME_MODE_STORAGE_KEY = 'chessapp.dashboard.theme.mode';
+const DASHBOARD_THEME_UPDATED_EVENT = 'chessapp.dashboard.theme.updated';
 const NEUMORPHIC_SWATCH_COLORS = [
-  '#7A94BF',
-  '#7EA7A5',
-  '#9AA67A',
-  '#B89A7A',
-  '#A58EB4',
-  '#7FA1C3',
+  '#5F7FE0',
+  '#32AFA3',
+  '#86B94A',
+  '#D6924C',
+  '#9A6FD8',
+  '#3D9CDB',
+] as const;
+const ACCURACY_THEME_NEON_SWATCH_COLORS = [
+  '#5B7BFF',
+  '#2FD8B7',
+  '#C2E94B',
+  '#FFAF4E',
+  '#FF74BC',
+  '#46CDFF',
 ] as const;
 const GRADIENT_DIRECTIONS = [
   { value: 'top-to-bottom', label: 'Top to bottom' },
@@ -69,6 +105,38 @@ type EloTrendData = {
 };
 
 type GradientDirection = (typeof GRADIENT_DIRECTIONS)[number]['value'];
+type AnalyticsTheme = (typeof ANALYTICS_THEMES)[number];
+type ThemeSettings = {
+  accentColor: string;
+  secondaryColor: string;
+  gradientEnabled: boolean;
+  gradientDirection: GradientDirection;
+};
+
+type ThemeSubmissionAssessment = {
+  submission: PuzzleSubmissionRecord;
+  theme: AnalyticsTheme;
+  reason: string;
+  accuracyPercent: number;
+};
+
+type ThemeAccuracyRow = {
+  theme: AnalyticsTheme;
+  accuracyPercent: number;
+  solvedCount: number;
+  assessments: ThemeSubmissionAssessment[];
+};
+
+type SolveTimeDifficultyBucket = {
+  label: string;
+  avgSolveTimeMs: number;
+  solvedCount: number;
+};
+
+type SolveTimeDifficultyData = {
+  buckets: SolveTimeDifficultyBucket[];
+  totalSolvedCount: number;
+};
 
 function normalizeHexColor(value: string | null | undefined): string | null {
   if (!value) {
@@ -173,24 +241,6 @@ function rgbaFromChannels(channels: [number, number, number], alpha: number): st
   return `rgba(${channels[0]}, ${channels[1]}, ${channels[2]}, ${alpha})`;
 }
 
-function toNeumorphicHexColor(value: string | null | undefined): string | null {
-  const normalized = normalizeHexColor(value);
-  if (!normalized) {
-    return null;
-  }
-
-  const channels = hexToRgbChannels(normalized);
-  if (!channels) {
-    return null;
-  }
-
-  const [hue, saturation, lightness] = rgbToHsl(channels[0], channels[1], channels[2]);
-  const neumoSaturation = clamp(24 + saturation * 0.38, 24, 58);
-  const neumoLightness = clamp(60 + (lightness - 50) * 0.2, 54, 74);
-  const neumoChannels = hslToRgb(hue, neumoSaturation, neumoLightness);
-  return rgbChannelsToHex(neumoChannels);
-}
-
 function resolveGradientAngle(direction: GradientDirection): string {
   if (direction === 'top-to-bottom') {
     return '180deg';
@@ -206,9 +256,26 @@ function buildDashboardBackground(
   secondary: [number, number, number],
   gradientEnabled: boolean,
   gradientDirection: GradientDirection,
+  isDark: boolean,
 ): string {
+  if (isDark) {
+    if (!gradientEnabled) {
+      return `radial-gradient(1150px circle at 16% 16%, rgba(148,163,184,0.16), rgba(2,6,23,0) 58%), radial-gradient(900px circle at 86% 8%, ${rgbaFromChannels(primary, 0.24)}, rgba(2,6,23,0) 56%), linear-gradient(180deg, #0F172A 0%, #020617 100%)`;
+    }
+
+    const gradientAngle = resolveGradientAngle(gradientDirection);
+    return `radial-gradient(1150px circle at 16% 16%, rgba(148,163,184,0.12), rgba(2,6,23,0) 58%), radial-gradient(900px circle at 86% 8%, ${rgbaFromChannels(primary, 0.2)}, rgba(2,6,23,0) 56%), linear-gradient(${gradientAngle}, ${rgbaFromChannels(primary, 0.34)} 0%, ${rgbaFromChannels(secondary, 0.38)} 100%), linear-gradient(180deg, #0F172A 0%, #020617 100%)`;
+  }
+
   if (!gradientEnabled) {
-    return `radial-gradient(1200px circle at 18% 18%, rgba(255,255,255,0.85), rgba(237,242,250,0) 60%), radial-gradient(940px circle at 88% 8%, ${rgbaFromChannels(primary, 0.2)}, rgba(255,255,255,0) 56%), linear-gradient(180deg, #dfe6f1 0%, #d9e2ef 100%)`;
+    if (
+      primary[0] === DEFAULT_DASHBOARD_ACCENT_CHANNELS[0] &&
+      primary[1] === DEFAULT_DASHBOARD_ACCENT_CHANNELS[1] &&
+      primary[2] === DEFAULT_DASHBOARD_ACCENT_CHANNELS[2]
+    ) {
+      return `radial-gradient(1200px circle at 18% 18%, rgba(255,255,255,0.85), rgba(237,242,250,0) 60%), radial-gradient(940px circle at 88% 8%, ${rgbaFromChannels(primary, 0.2)}, rgba(255,255,255,0) 56%), linear-gradient(180deg, #dfe6f1 0%, #d9e2ef 100%)`;
+    }
+    return `radial-gradient(1200px circle at 18% 18%, rgba(255,255,255,0.86), rgba(237,242,250,0) 60%), radial-gradient(980px circle at 86% 10%, ${rgbaFromChannels(primary, 0.34)}, rgba(255,255,255,0) 58%), linear-gradient(180deg, ${rgbaFromChannels(primary, 0.14)} 0%, rgba(255,255,255,0.04) 100%), linear-gradient(180deg, #dfe6f1 0%, #d9e2ef 100%)`;
   }
 
   const gradientAngle = resolveGradientAngle(gradientDirection);
@@ -220,9 +287,33 @@ function buildPanelGradientBackground(
   secondary: [number, number, number],
   gradientEnabled: boolean,
   gradientDirection: GradientDirection,
+  isDark: boolean,
 ): string | undefined {
+  if (isDark) {
+    if (!gradientEnabled) {
+      if (
+        primary[0] === DEFAULT_DASHBOARD_ACCENT_CHANNELS[0] &&
+        primary[1] === DEFAULT_DASHBOARD_ACCENT_CHANNELS[1] &&
+        primary[2] === DEFAULT_DASHBOARD_ACCENT_CHANNELS[2]
+      ) {
+        return `linear-gradient(180deg, rgba(15,23,42,0.86) 0%, rgba(2,6,23,0.92) 100%), rgb(var(--surface))`;
+      }
+      return `linear-gradient(180deg, ${rgbaFromChannels(primary, 0.26)} 0%, rgba(2,6,23,0.6) 100%), linear-gradient(180deg, rgba(15,23,42,0.8) 0%, rgba(2,6,23,0.92) 100%), rgb(var(--surface))`;
+    }
+
+    const gradientAngle = resolveGradientAngle(gradientDirection);
+    return `linear-gradient(${gradientAngle}, ${rgbaFromChannels(primary, 0.24)} 0%, ${rgbaFromChannels(secondary, 0.28)} 100%), linear-gradient(180deg, rgba(15,23,42,0.82) 0%, rgba(2,6,23,0.92) 100%), rgb(var(--surface))`;
+  }
+
   if (!gradientEnabled) {
-    return undefined;
+    if (
+      primary[0] === DEFAULT_DASHBOARD_ACCENT_CHANNELS[0] &&
+      primary[1] === DEFAULT_DASHBOARD_ACCENT_CHANNELS[1] &&
+      primary[2] === DEFAULT_DASHBOARD_ACCENT_CHANNELS[2]
+    ) {
+      return undefined;
+    }
+    return `linear-gradient(180deg, ${rgbaFromChannels(primary, 0.26)} 0%, ${rgbaFromChannels(primary, 0.14)} 100%), linear-gradient(180deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.08) 100%), rgb(var(--surface))`;
   }
 
   const gradientAngle = resolveGradientAngle(gradientDirection);
@@ -258,6 +349,25 @@ function buildChartPaths(values: number[], width: number, height: number) {
 
   const areaPath = `${curve} L ${width} ${height} L 0 ${height} Z`;
   return { areaPath, linePath: curve };
+}
+
+function buildYAxisTicks(values: number[]): number[] {
+  const sanitizedValues = values.map((value) =>
+    typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0,
+  );
+  const maxValue = Math.max(...sanitizedValues, 0);
+  if (maxValue === 0) {
+    return [0];
+  }
+
+  const rawTicks = Array.from({ length: 4 }, (_, idx) =>
+    Math.round(maxValue - (idx * maxValue) / 3),
+  );
+  const ticks = Array.from(new Set(rawTicks));
+  if (ticks[ticks.length - 1] !== 0) {
+    ticks.push(0);
+  }
+  return ticks;
 }
 
 function StatCard({
@@ -301,8 +411,8 @@ function StatCard({
       <button
         type="button"
         onClick={onClick}
-        className={`neumo-surface-soft rounded-3xl px-5 py-4 text-left transition ${
-          active ? 'ring-2 ring-slate-300/80' : 'hover:-translate-y-[1px]'
+        className={`neumo-surface-soft rounded-3xl px-5 py-4 text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)] ${
+          active ? 'ring-2 ring-slate-300/80' : ''
         } ${cardClassName}`}
         style={cardStyle}
       >
@@ -759,11 +869,208 @@ function calculateStreaks(submissions: PuzzleSubmissionRecord[]) {
   return { bestStreakDays, currentStreakDays };
 }
 
+function hashText(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+function calculateSubmissionAccuracyPercent(submission: PuzzleSubmissionRecord): number {
+  const confidence = submission.positionCheck.confidence;
+  if (typeof confidence === 'number' && Number.isFinite(confidence)) {
+    return clamp(Math.round(confidence * 100), 1, 100);
+  }
+
+  let score = 78;
+  const attemptsUsed = submission.positionCheck.attemptsUsed;
+  if (typeof attemptsUsed === 'number' && Number.isFinite(attemptsUsed) && attemptsUsed > 1) {
+    score -= Math.min(20, Math.round((attemptsUsed - 1) * 6));
+  }
+
+  if (typeof submission.solveTimeMs === 'number' && Number.isFinite(submission.solveTimeMs)) {
+    const solveTimeSeconds = submission.solveTimeMs / 1000;
+    if (solveTimeSeconds > 20) {
+      score -= Math.min(22, Math.round((solveTimeSeconds - 20) / 6));
+    } else {
+      score += Math.min(8, Math.round((20 - solveTimeSeconds) / 5));
+    }
+  }
+
+  if (submission.positionCheck.mateFound === true) {
+    score += 4;
+  }
+
+  return clamp(Math.round(score), 30, 99);
+}
+
+function inferSubmissionTheme(submission: PuzzleSubmissionRecord): {
+  theme: AnalyticsTheme;
+  reason: string;
+} {
+  const searchable = `${submission.fileName} ${submission.solutionLines.join(' ')}`.toLowerCase();
+  const sanLine = submission.solutionLines.join(' ');
+  const captureCount = (sanLine.match(/x/g) ?? []).length;
+
+  if (/\bback[-\s]?rank\b/.test(searchable)) {
+    return { theme: 'Back-Rank Mates', reason: 'Detected back-rank keyword' };
+  }
+  if (/\bskewer(s)?\b|\bx[-\s]?ray\b/.test(searchable)) {
+    return { theme: 'Skewers', reason: 'Detected skewer keyword' };
+  }
+  if (/\bsacrific(e|es|ed|ing)?\b|\bdecoy\b|\bdeflection\b|\bclearance\b/.test(searchable)) {
+    return { theme: 'Sacrifices', reason: 'Detected sacrifice-style keyword' };
+  }
+  if (/\bpin(s|ned|ning)?\b/.test(searchable)) {
+    return { theme: 'Pins', reason: 'Detected pin keyword' };
+  }
+  if (/\bfork(s|ed|ing)?\b/.test(searchable)) {
+    return { theme: 'Forks', reason: 'Detected fork keyword' };
+  }
+
+  if (/\b[QR][a-h]?[1-8]?x?[a-h][18]#\b/.test(sanLine)) {
+    return { theme: 'Back-Rank Mates', reason: 'Detected back-rank mate pattern in SAN' };
+  }
+  if (
+    /\bN[a-h]?[1-8]?x?[a-h][1-8][+#]\b/.test(sanLine) ||
+    /\bN[a-h][1-8]\+/.test(sanLine)
+  ) {
+    return { theme: 'Forks', reason: 'Detected forcing knight tactic pattern' };
+  }
+  if (
+    /\bB[a-h]?[1-8]?x?[a-h][1-8]\+/.test(sanLine) ||
+    /\bQ[a-h]?[1-8]?x?[a-h][1-8]\+/.test(sanLine)
+  ) {
+    return { theme: 'Pins', reason: 'Detected pressure-line check pattern' };
+  }
+  if (captureCount >= 2 && (submission.positionCheck.mateIn ?? 0) >= 2) {
+    return { theme: 'Sacrifices', reason: 'Detected multi-capture conversion pattern' };
+  }
+  if (/\b[QRB][a-h]?[1-8]?x?[a-h][1-8]\+/.test(sanLine)) {
+    return { theme: 'Skewers', reason: 'Detected line-piece forcing pattern' };
+  }
+
+  const fallbackIndex =
+    hashText(`${submission.id}|${submission.fileName}|${submission.submittedAt}`) %
+    ANALYTICS_THEMES.length;
+  return {
+    theme: ANALYTICS_THEMES[fallbackIndex],
+    reason: 'Fallback classification from recent solve metadata',
+  };
+}
+
+function buildThemeAccuracyRows(submissions: PuzzleSubmissionRecord[]): {
+  rows: ThemeAccuracyRow[];
+  weakestTheme: AnalyticsTheme;
+} {
+  const grouped = new Map<AnalyticsTheme, ThemeSubmissionAssessment[]>();
+  ANALYTICS_THEMES.forEach((theme) => grouped.set(theme, []));
+
+  submissions.slice(0, ANALYTICS_RECENT_SOLVE_LIMIT).forEach((submission) => {
+    const { theme, reason } = inferSubmissionTheme(submission);
+    const bucket = grouped.get(theme);
+    if (!bucket) {
+      return;
+    }
+    bucket.push({
+      submission,
+      theme,
+      reason,
+      accuracyPercent: calculateSubmissionAccuracyPercent(submission),
+    });
+  });
+
+  const rows = ANALYTICS_THEMES.map((theme) => {
+    const assessments = grouped.get(theme) ?? [];
+    const baseline = ANALYTICS_BASELINE_ACCURACY[theme];
+    if (assessments.length === 0) {
+      return {
+        theme,
+        accuracyPercent: baseline,
+        solvedCount: 0,
+        assessments: [],
+      };
+    }
+
+    const liveAverage =
+      assessments.reduce((sum, assessment) => sum + assessment.accuracyPercent, 0) /
+      assessments.length;
+    const blendedAccuracy = clamp(Math.round(liveAverage * 0.82 + baseline * 0.18), 1, 100);
+
+    return {
+      theme,
+      accuracyPercent: blendedAccuracy,
+      solvedCount: assessments.length,
+      assessments,
+    };
+  });
+
+  const weakestTheme = rows.reduce((weakest, row) =>
+    row.accuracyPercent < weakest.accuracyPercent ? row : weakest,
+  ).theme;
+
+  return { rows, weakestTheme };
+}
+
+function buildSolveTimeDifficultyData(
+  submissions: PuzzleSubmissionRecord[],
+): SolveTimeDifficultyData {
+  const timedEntries = submissions
+    .map((submission) => {
+      if (typeof submission.solveTimeMs !== 'number' || !Number.isFinite(submission.solveTimeMs)) {
+        return null;
+      }
+      return {
+        elo: resolveSubmissionElo(submission),
+        solveTimeMs: submission.solveTimeMs,
+      };
+    })
+    .filter((entry): entry is { elo: number; solveTimeMs: number } => entry !== null);
+
+  if (timedEntries.length === 0) {
+    return { buckets: [], totalSolvedCount: 0 };
+  }
+
+  const bucketMap = new Map<number, { sumSolveTimeMs: number; solvedCount: number }>();
+  timedEntries.forEach((entry) => {
+    const bucketStart =
+      Math.floor(entry.elo / DIFFICULTY_ELO_BUCKET_SIZE) * DIFFICULTY_ELO_BUCKET_SIZE;
+    const bucket = bucketMap.get(bucketStart);
+    if (bucket) {
+      bucket.sumSolveTimeMs += entry.solveTimeMs;
+      bucket.solvedCount += 1;
+      return;
+    }
+    bucketMap.set(bucketStart, {
+      sumSolveTimeMs: entry.solveTimeMs,
+      solvedCount: 1,
+    });
+  });
+
+  const sortedStarts = Array.from(bucketMap.keys()).sort((a, b) => a - b);
+  const buckets = sortedStarts.map((start) => {
+    const summary = bucketMap.get(start)!;
+    const end = start + DIFFICULTY_ELO_BUCKET_SIZE - 1;
+    return {
+      label: `${start}-${end}`,
+      avgSolveTimeMs: summary.sumSolveTimeMs / summary.solvedCount,
+      solvedCount: summary.solvedCount,
+    };
+  });
+
+  return {
+    buckets,
+    totalSolvedCount: timedEntries.length,
+  };
+}
+
 function AreaChart({
   title,
   subtitle,
   values,
   axisLabels,
+  yAxisTicks,
   sectionStyle,
   buttonStyle,
 }: {
@@ -771,12 +1078,22 @@ function AreaChart({
   subtitle: string;
   values: number[];
   axisLabels?: string[];
+  yAxisTicks?: number[];
   sectionStyle?: React.CSSProperties;
   buttonStyle?: React.CSSProperties;
 }) {
   const { areaPath, linePath } = useMemo(() => buildChartPaths(values, 860, 190), [values]);
   const chartId = title.toLowerCase().replace(/\s+/g, '-');
   const labels = axisLabels ?? ['9:00 AM', '12:00 PM', '3:00 PM', '6:00 PM', '9:00 PM', 'Now'];
+  const ticks = yAxisTicks ?? [];
+  const hasYAxis = ticks.length > 0;
+  const maxTick = ticks.length > 0 ? Math.max(ticks[0], 0) : 0;
+  const axisTickY = (tick: number) => {
+    const padTop = 18;
+    const usableHeight = 190 - padTop - 16;
+    const normalizedValue = maxTick > 0 ? tick / maxTick : 0;
+    return 190 - 12 - normalizedValue * usableHeight;
+  };
 
   return (
     <section className="neumo-surface-soft rounded-[26px] p-5 md:p-7" style={sectionStyle}>
@@ -787,7 +1104,7 @@ function AreaChart({
         </div>
         <button
           type="button"
-          className="neumo-pill px-4 py-2 text-xs font-semibold text-slate-500 flex items-center gap-2"
+          className="neumo-pill px-4 py-2 text-xs font-semibold text-slate-500 flex items-center gap-2 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
           style={buttonStyle}
         >
           <Download className="h-4 w-4" />
@@ -797,7 +1114,7 @@ function AreaChart({
 
       <div className="mt-5">
         <svg
-          viewBox="0 0 860 190"
+          viewBox={hasYAxis ? '-44 0 904 190' : '0 0 860 190'}
           className="h-[170px] w-full"
           role="img"
           aria-label={`${title} area chart`}
@@ -813,11 +1130,34 @@ function AreaChart({
             </linearGradient>
           </defs>
 
-          <g stroke="rgba(148,163,184,0.22)" strokeWidth="1">
-            <line x1="0" y1="36" x2="860" y2="36" />
-            <line x1="0" y1="92" x2="860" y2="92" />
-            <line x1="0" y1="148" x2="860" y2="148" />
-          </g>
+          {hasYAxis ? (
+            <>
+              <g stroke="rgba(148,163,184,0.22)" strokeWidth="1">
+                {ticks.map((tick, idx) => (
+                  <line key={`${tick}-${idx}`} x1="0" y1={axisTickY(tick)} x2="860" y2={axisTickY(tick)} />
+                ))}
+                <line x1="0" y1="18" x2="0" y2="178" />
+              </g>
+              <g fill="rgba(100,116,139,0.78)" fontSize="10">
+                {ticks.map((tick, idx) => (
+                  <text
+                    key={`y-axis-${tick}-${idx}`}
+                    x="-8"
+                    y={axisTickY(tick) + 3}
+                    textAnchor="end"
+                  >
+                    {tick}
+                  </text>
+                ))}
+              </g>
+            </>
+          ) : (
+            <g stroke="rgba(148,163,184,0.22)" strokeWidth="1">
+              <line x1="0" y1="36" x2="860" y2="36" />
+              <line x1="0" y1="92" x2="860" y2="92" />
+              <line x1="0" y1="148" x2="860" y2="148" />
+            </g>
+          )}
 
           <path d={areaPath} fill={`url(#${chartId}-fill)`} />
           <path
@@ -842,6 +1182,79 @@ function AreaChart({
   );
 }
 
+function SolveTimeVsDifficultyChart({
+  data,
+  sectionStyle,
+  accentChannels,
+  onCollapse,
+}: {
+  data: SolveTimeDifficultyData;
+  sectionStyle?: React.CSSProperties;
+  accentChannels: [number, number, number];
+  onCollapse?: () => void;
+}) {
+  const chartId = useId();
+  const buckets = Array.isArray(data?.buckets) ? data.buckets : [];
+
+  return (
+    <article
+      id={`solve-time-vs-difficulty-${chartId}`}
+      className="neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between"
+      style={sectionStyle}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Analytics</p>
+          <h3 className="mt-1 text-base font-semibold text-slate-700">Solve Time vs Difficulty</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Difficulty buckets mapped to average solve time.
+          </p>
+        </div>
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            className="rounded-full neumo-pill px-3 py-1 text-xs font-semibold text-slate-600 inline-flex items-center gap-1.5 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+            style={sectionStyle}
+            aria-label="Collapse solve time vs difficulty section"
+          >
+            <ChevronUp className="h-3.5 w-3.5" />
+            Collapse
+          </button>
+        )}
+      </div>
+
+      {buckets.length === 0 ? (
+        <p className="mt-3 text-xs text-slate-400">No solve timing data yet.</p>
+      ) : (
+        <div className="mt-3 space-y-2">
+          <div className="rounded-xl border border-slate-200/70 bg-white/25 px-3 py-2">
+            <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Elo buckets</p>
+            <div className="mt-2 space-y-1.5">
+              {buckets.slice(0, 6).map((bucket) => (
+                <div key={bucket.label} className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className="font-medium text-slate-600">{bucket.label}</span>
+                  <span
+                    className="rounded-full px-2 py-0.5 text-slate-600"
+                    style={{ backgroundColor: rgbaFromChannels(accentChannels, 0.16) }}
+                  >
+                    {formatSolveTimeMs(bucket.avgSolveTimeMs)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <p className="text-[11px] text-slate-400">
+            Based on {data.totalSolvedCount} solved submission
+            {data.totalSolvedCount === 1 ? '' : 's'} with timing data.
+          </p>
+        </div>
+      )}
+    </article>
+  );
+}
+
 function NeumorphicColorWheel({
   label,
   color,
@@ -852,6 +1265,7 @@ function NeumorphicColorWheel({
   onColorChange: (nextColor: string) => void;
 }) {
   const wheelRef = useRef<HTMLDivElement | null>(null);
+  const activePointerIdRef = useRef<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const colorChannels = useMemo<[number, number, number]>(
     () => hexToRgbChannels(color) ?? hexToRgbChannels(DEFAULT_DASHBOARD_ACCENT) ?? [122, 148, 191],
@@ -901,30 +1315,39 @@ function NeumorphicColorWheel({
         }}
         onPointerDown={(event) => {
           event.preventDefault();
+          activePointerIdRef.current = event.pointerId;
           wheelRef.current?.setPointerCapture(event.pointerId);
           setIsDragging(true);
           applyPointerColor(event.clientX, event.clientY);
         }}
         onPointerMove={(event) => {
-          if (!isDragging) {
+          if (activePointerIdRef.current !== event.pointerId) {
             return;
           }
           applyPointerColor(event.clientX, event.clientY);
         }}
         onPointerUp={(event) => {
+          if (activePointerIdRef.current !== event.pointerId) {
+            return;
+          }
           if (wheelRef.current?.hasPointerCapture(event.pointerId)) {
             wheelRef.current.releasePointerCapture(event.pointerId);
           }
+          activePointerIdRef.current = null;
           setIsDragging(false);
         }}
         onPointerCancel={(event) => {
+          if (activePointerIdRef.current !== event.pointerId) {
+            return;
+          }
           if (wheelRef.current?.hasPointerCapture(event.pointerId)) {
             wheelRef.current.releasePointerCapture(event.pointerId);
           }
+          activePointerIdRef.current = null;
           setIsDragging(false);
         }}
       >
-        <div className="h-full w-full rounded-full bg-[radial-gradient(circle,#ffffff_0%,#f1f5f9_65%,#cbd5e1_100%)]" />
+        <div className="pointer-events-none h-full w-full rounded-full bg-[radial-gradient(circle,#ffffff_0%,#f1f5f9_65%,#cbd5e1_100%)]" />
         <span
           className="pointer-events-none absolute h-14 w-14 -translate-x-1/2 -translate-y-1/2 rounded-full border-4 border-white shadow-[0_12px_20px_rgba(15,23,42,0.28)]"
           style={{
@@ -940,31 +1363,41 @@ function NeumorphicColorWheel({
 }
 
 function SettingsPanel({
+  isDark,
   accentColor,
   accentChannels,
   secondaryColor,
   secondaryChannels,
   gradientEnabled,
   gradientDirection,
+  onThemeModeChange,
   onAccentChange,
   onSecondaryColorChange,
   onGradientEnabledChange,
   onGradientDirectionChange,
   onAccentReset,
+  onSaveTheme,
+  hasUnsavedThemeChanges,
+  themeSavedNoticeVisible,
   sectionStyle,
   buttonStyle,
 }: {
+  isDark: boolean;
   accentColor: string;
   accentChannels: [number, number, number];
   secondaryColor: string;
   secondaryChannels: [number, number, number];
   gradientEnabled: boolean;
   gradientDirection: GradientDirection;
+  onThemeModeChange: (mode: 'light' | 'dark') => void;
   onAccentChange: (nextColor: string) => void;
   onSecondaryColorChange: (nextColor: string) => void;
   onGradientEnabledChange: (enabled: boolean) => void;
   onGradientDirectionChange: (direction: GradientDirection) => void;
   onAccentReset: () => void;
+  onSaveTheme: () => void;
+  hasUnsavedThemeChanges: boolean;
+  themeSavedNoticeVisible: boolean;
   sectionStyle?: React.CSSProperties;
   buttonStyle?: React.CSSProperties;
 }) {
@@ -973,7 +1406,7 @@ function SettingsPanel({
   return (
     <div className="space-y-4">
       <section className="neumo-surface-soft rounded-[26px] p-5 md:p-7" style={sectionStyle}>
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-700">1. Account &amp; Profile</h2>
+        <h2 className="text-2xl font-semibold tracking-tight text-slate-700">Account &amp; Profile</h2>
         <p className="mt-1 text-sm text-slate-500">
           Update identity details, manage credentials, and control account access.
         </p>
@@ -1002,7 +1435,7 @@ function SettingsPanel({
               </label>
               <button
                 type="button"
-                className="neumo-pill mt-1 px-4 py-2 text-sm font-semibold text-slate-600"
+                className="neumo-pill mt-1 px-4 py-2 text-sm font-semibold text-slate-600 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                 style={buttonStyle}
               >
                 Save profile
@@ -1038,7 +1471,7 @@ function SettingsPanel({
               </label>
               <button
                 type="button"
-                className="neumo-pill mt-1 px-4 py-2 text-sm font-semibold text-slate-600"
+                className="neumo-pill mt-1 px-4 py-2 text-sm font-semibold text-slate-600 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                 style={buttonStyle}
               >
                 Update password
@@ -1062,7 +1495,7 @@ function SettingsPanel({
       </section>
 
       <section className="neumo-surface-soft rounded-[26px] p-5 md:p-7" style={sectionStyle}>
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-700">2. Theme &amp; UI</h2>
+        <h2 className="text-2xl font-semibold tracking-tight text-slate-700">Theme &amp; UI</h2>
         <p className="mt-1 text-sm text-slate-500">
           Drag the hockey puck to recolor the dashboard background in real time while keeping the
           classic Chess App neumorphic surface style.
@@ -1073,8 +1506,36 @@ function SettingsPanel({
           <div className="mt-3 flex gap-2">
             <button
               type="button"
+              onClick={() => onThemeModeChange('light')}
+              className={`px-4 py-2 text-sm font-semibold rounded-full transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)] ${
+                !isDark ? 'neumo-pill text-slate-700' : 'neumo-inset text-slate-500'
+              }`}
+              style={buttonStyle}
+            >
+              Light
+            </button>
+            <button
+              type="button"
+              onClick={() => onThemeModeChange('dark')}
+              className={`px-4 py-2 text-sm font-semibold rounded-full transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)] ${
+                isDark ? 'neumo-pill text-slate-700' : 'neumo-inset text-slate-500'
+              }`}
+              style={buttonStyle}
+            >
+              Dark
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-2xl neumo-inset px-4 py-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+            Background style
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
               onClick={() => onGradientEnabledChange(false)}
-              className={`px-4 py-2 text-sm font-semibold rounded-full transition ${
+              className={`px-4 py-2 text-sm font-semibold rounded-full transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)] ${
                 !gradientEnabled ? 'neumo-pill text-slate-700' : 'neumo-inset text-slate-500'
               }`}
               style={buttonStyle}
@@ -1084,7 +1545,7 @@ function SettingsPanel({
             <button
               type="button"
               onClick={() => onGradientEnabledChange(true)}
-              className={`px-4 py-2 text-sm font-semibold rounded-full transition ${
+              className={`px-4 py-2 text-sm font-semibold rounded-full transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)] ${
                 gradientEnabled ? 'neumo-pill text-slate-700' : 'neumo-inset text-slate-500'
               }`}
               style={buttonStyle}
@@ -1105,7 +1566,7 @@ function SettingsPanel({
                   key={option.value}
                   type="button"
                   onClick={() => onGradientDirectionChange(option.value)}
-                  className={`px-4 py-2 text-sm font-semibold rounded-full transition ${
+                  className={`px-4 py-2 text-sm font-semibold rounded-full transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)] ${
                     gradientDirection === option.value
                       ? 'neumo-pill text-slate-700'
                       : 'neumo-inset text-slate-500'
@@ -1160,11 +1621,25 @@ function SettingsPanel({
                 <button
                   type="button"
                   onClick={onAccentReset}
-                  className="neumo-pill px-4 py-2 text-sm font-semibold text-slate-600"
+                  className="neumo-pill px-4 py-2 text-sm font-semibold text-slate-600 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                   style={buttonStyle}
                 >
                   Reset default
                 </button>
+                <button
+                  type="button"
+                  onClick={onSaveTheme}
+                  disabled={!hasUnsavedThemeChanges}
+                  className="neumo-pill px-4 py-2 text-sm font-semibold text-slate-600 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
+                  style={buttonStyle}
+                >
+                  Save theme
+                </button>
+                {themeSavedNoticeVisible && (
+                  <span className="text-xs font-semibold uppercase tracking-[0.08em] text-emerald-600">
+                    Saved
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1172,24 +1647,71 @@ function SettingsPanel({
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                 Quick color swatches
               </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {swatchColors.map((color) => (
-                  <button
-                    key={`${color}-${gradientEnabled ? 'gradient' : 'solid'}`}
-                    type="button"
-                    onClick={() =>
-                      gradientEnabled ? onSecondaryColorChange(color) : onAccentChange(color)
-                    }
-                    aria-label={`Set ${gradientEnabled ? 'secondary' : 'accent'} color ${color}`}
-                    className={`h-9 w-9 rounded-full border-2 border-white shadow-sm transition hover:scale-105 ${
-                      color === (gradientEnabled ? secondaryColor : accentColor)
-                        ? 'ring-2 ring-slate-400/70'
-                        : ''
-                    }`}
-                    style={{ backgroundColor: color }}
-                  />
-                ))}
-              </div>
+              {!gradientEnabled && (
+                <div className="mt-3">
+                  <p className="mb-2 text-[11px] uppercase tracking-[0.08em] text-slate-400">
+                    Solid color
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {swatchColors.map((color) => (
+                      <button
+                        key={`solid-${color}`}
+                        type="button"
+                        onClick={() => onAccentChange(color)}
+                        aria-label={`Set solid color ${color}`}
+                        className={`h-9 w-9 rounded-full border-2 border-white shadow-sm transition hover:scale-105 ${
+                          color === accentColor ? 'ring-2 ring-slate-400/70' : ''
+                        }`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {gradientEnabled && (
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <p className="mb-2 text-[11px] uppercase tracking-[0.08em] text-slate-400">
+                      Gradient start
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {swatchColors.map((color) => (
+                        <button
+                          key={`gradient-start-${color}`}
+                          type="button"
+                          onClick={() => onAccentChange(color)}
+                          aria-label={`Set gradient start color ${color}`}
+                          className={`h-9 w-9 rounded-full border-2 border-white shadow-sm transition hover:scale-105 ${
+                            color === accentColor ? 'ring-2 ring-slate-400/70' : ''
+                          }`}
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-[11px] uppercase tracking-[0.08em] text-slate-400">
+                      Gradient end
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {swatchColors.map((color) => (
+                        <button
+                          key={`gradient-end-${color}`}
+                          type="button"
+                          onClick={() => onSecondaryColorChange(color)}
+                          aria-label={`Set gradient end color ${color}`}
+                          className={`h-9 w-9 rounded-full border-2 border-white shadow-sm transition hover:scale-105 ${
+                            color === secondaryColor ? 'ring-2 ring-slate-400/70' : ''
+                          }`}
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {gradientEnabled && (
@@ -1215,53 +1737,192 @@ function SettingsPanel({
 }
 
 export default function DashboardPage() {
+  const { theme, resolvedTheme, setTheme } = useTheme();
+  const { user } = useUser();
   const router = useRouter();
+  const isMounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   const [activeNavLabel, setActiveNavLabel] = useState<string>('Dashboard');
   const [activeRange, setActiveRange] = useState<(typeof RANGE_TABS)[number]>('Today');
+  const [selectedAnalyticsTheme, setSelectedAnalyticsTheme] = useState<AnalyticsTheme | null>(null);
+  const [isAnalyticsSectionsOpen, setIsAnalyticsSectionsOpen] = useState(true);
+  const [isSolveTimeSectionOpen, setIsSolveTimeSectionOpen] = useState(true);
   const [isTransitioningToChessApp, setIsTransitioningToChessApp] = useState(false);
   const [showSubmissionHistory, setShowSubmissionHistory] = useState(false);
   const [submissions, setSubmissions] = useState<PuzzleSubmissionRecord[]>([]);
   const [expandedSubmissionId, setExpandedSubmissionId] = useState<string | null>(null);
-  const [accentColor, setAccentColor] = useState<string>(() => {
-    if (typeof window === 'undefined') {
-      return DEFAULT_DASHBOARD_ACCENT;
-    }
-    return (
-      toNeumorphicHexColor(window.localStorage.getItem(DASHBOARD_ACCENT_STORAGE_KEY)) ??
-      DEFAULT_DASHBOARD_ACCENT
-    );
+  const [accentColor, setAccentColor] = useState<string>(DEFAULT_DASHBOARD_ACCENT);
+  const [secondaryColor, setSecondaryColor] = useState<string>(DEFAULT_DASHBOARD_SECONDARY);
+  const [gradientEnabled, setGradientEnabled] = useState<boolean>(false);
+  const [gradientDirection, setGradientDirection] = useState<GradientDirection>('top-to-bottom');
+  const [savedThemeSettings, setSavedThemeSettings] = useState<ThemeSettings>({
+    accentColor: DEFAULT_DASHBOARD_ACCENT,
+    secondaryColor: DEFAULT_DASHBOARD_SECONDARY,
+    gradientEnabled: false,
+    gradientDirection: 'top-to-bottom',
   });
-  const [secondaryColor, setSecondaryColor] = useState<string>(() => {
-    if (typeof window === 'undefined') {
-      return DEFAULT_DASHBOARD_SECONDARY;
-    }
-    return (
-      toNeumorphicHexColor(window.localStorage.getItem(DASHBOARD_SECONDARY_STORAGE_KEY)) ??
-      DEFAULT_DASHBOARD_SECONDARY
-    );
-  });
-  const [gradientEnabled, setGradientEnabled] = useState<boolean>(() => {
-    if (typeof window === 'undefined') {
-      return false;
-    }
-    return window.localStorage.getItem(DASHBOARD_GRADIENT_ENABLED_STORAGE_KEY) === '1';
-  });
-  const [gradientDirection, setGradientDirection] = useState<GradientDirection>(() => {
-    if (typeof window === 'undefined') {
-      return 'top-to-bottom';
-    }
+  const [themeSavedNoticeVisible, setThemeSavedNoticeVisible] = useState(false);
+  const [settingsStorageScope, setSettingsStorageScope] = useState<string | null>(null);
+  const themeSavedNoticeTimeoutRef = useRef<number | null>(null);
+  const appliedThemeScopeRef = useRef<string | null>(null);
+  const isDark = theme === 'dark' || (theme === 'system' && resolvedTheme === 'dark');
 
-    const storedDirection = window.localStorage.getItem(DASHBOARD_GRADIENT_DIRECTION_STORAGE_KEY);
-    if (
-      storedDirection === 'top-to-bottom' ||
-      storedDirection === 'diagonal' ||
-      storedDirection === 'bottom-to-top'
-    ) {
-      return storedDirection;
-    }
+  const applyThemeCssVariables = useCallback((accent: string, secondary: string) => {
+    document.documentElement.style.setProperty('--chess-app-accent', accent);
+    document.documentElement.style.setProperty('--chess-app-accent-secondary', secondary);
+  }, []);
 
-    return 'top-to-bottom';
-  });
+  useEffect(() => {
+    const syncSettingsScope = () => {
+      setSettingsStorageScope(resolveUserSettingsScope(user?.sub ?? null));
+    };
+
+    syncSettingsScope();
+    window.addEventListener('storage', syncSettingsScope);
+    window.addEventListener('focus', syncSettingsScope);
+    return () => {
+      window.removeEventListener('storage', syncSettingsScope);
+      window.removeEventListener('focus', syncSettingsScope);
+    };
+  }, [user?.sub]);
+
+  const persistThemeSettings = useCallback(
+    (themeSettings: ThemeSettings) => {
+      const normalizedAccent = normalizeHexColor(themeSettings.accentColor) ?? DEFAULT_DASHBOARD_ACCENT;
+      const normalizedSecondary =
+        normalizeHexColor(themeSettings.secondaryColor) ?? DEFAULT_DASHBOARD_SECONDARY;
+      const normalizedDirection =
+        themeSettings.gradientDirection === 'top-to-bottom' ||
+        themeSettings.gradientDirection === 'diagonal' ||
+        themeSettings.gradientDirection === 'bottom-to-top'
+          ? themeSettings.gradientDirection
+          : 'top-to-bottom';
+
+      writeScopedStorageValue(DASHBOARD_ACCENT_STORAGE_KEY, settingsStorageScope, normalizedAccent);
+      writeScopedStorageValue(
+        DASHBOARD_SECONDARY_STORAGE_KEY,
+        settingsStorageScope,
+        normalizedSecondary,
+      );
+      writeScopedStorageValue(
+        DASHBOARD_GRADIENT_ENABLED_STORAGE_KEY,
+        settingsStorageScope,
+        themeSettings.gradientEnabled ? '1' : '0',
+      );
+      writeScopedStorageValue(
+        DASHBOARD_GRADIENT_DIRECTION_STORAGE_KEY,
+        settingsStorageScope,
+        normalizedDirection,
+      );
+      if (theme === 'light' || theme === 'dark') {
+        writeScopedStorageValue(DASHBOARD_THEME_MODE_STORAGE_KEY, settingsStorageScope, theme);
+      }
+      applyThemeCssVariables(normalizedAccent, normalizedSecondary);
+      window.dispatchEvent(new Event(DASHBOARD_THEME_UPDATED_EVENT));
+
+      setSavedThemeSettings({
+        accentColor: normalizedAccent,
+        secondaryColor: normalizedSecondary,
+        gradientEnabled: themeSettings.gradientEnabled,
+        gradientDirection: normalizedDirection,
+      });
+      setThemeSavedNoticeVisible(true);
+      if (themeSavedNoticeTimeoutRef.current !== null) {
+        window.clearTimeout(themeSavedNoticeTimeoutRef.current);
+      }
+      themeSavedNoticeTimeoutRef.current = window.setTimeout(() => {
+        setThemeSavedNoticeVisible(false);
+        themeSavedNoticeTimeoutRef.current = null;
+      }, 1600);
+    },
+    [applyThemeCssVariables, settingsStorageScope, theme],
+  );
+
+  useEffect(() => {
+    const syncThemeFromStorage = () => {
+      const nextAccent =
+        normalizeHexColor(readScopedStorageValue(DASHBOARD_ACCENT_STORAGE_KEY, settingsStorageScope)) ??
+        DEFAULT_DASHBOARD_ACCENT;
+      const nextSecondary =
+        normalizeHexColor(
+          readScopedStorageValue(DASHBOARD_SECONDARY_STORAGE_KEY, settingsStorageScope),
+        ) ??
+        DEFAULT_DASHBOARD_SECONDARY;
+      const nextGradientEnabled =
+        readScopedStorageValue(DASHBOARD_GRADIENT_ENABLED_STORAGE_KEY, settingsStorageScope) === '1';
+      const storedDirection = readScopedStorageValue(
+        DASHBOARD_GRADIENT_DIRECTION_STORAGE_KEY,
+        settingsStorageScope,
+      );
+      const nextGradientDirection: GradientDirection =
+        storedDirection === 'top-to-bottom' ||
+        storedDirection === 'diagonal' ||
+        storedDirection === 'bottom-to-top'
+          ? storedDirection
+          : 'top-to-bottom';
+
+      setAccentColor((previous) => (previous === nextAccent ? previous : nextAccent));
+      setSecondaryColor((previous) => (previous === nextSecondary ? previous : nextSecondary));
+      setGradientEnabled((previous) =>
+        previous === nextGradientEnabled ? previous : nextGradientEnabled,
+      );
+      setGradientDirection((previous) =>
+        previous === nextGradientDirection ? previous : nextGradientDirection,
+      );
+      setSavedThemeSettings((previous) => {
+        if (
+          previous.accentColor === nextAccent &&
+          previous.secondaryColor === nextSecondary &&
+          previous.gradientEnabled === nextGradientEnabled &&
+          previous.gradientDirection === nextGradientDirection
+        ) {
+          return previous;
+        }
+        return {
+          accentColor: nextAccent,
+          secondaryColor: nextSecondary,
+          gradientEnabled: nextGradientEnabled,
+          gradientDirection: nextGradientDirection,
+        };
+      });
+      applyThemeCssVariables(nextAccent, nextSecondary);
+    };
+
+    syncThemeFromStorage();
+    window.addEventListener('storage', syncThemeFromStorage);
+    window.addEventListener('focus', syncThemeFromStorage);
+    window.addEventListener(DASHBOARD_THEME_UPDATED_EVENT, syncThemeFromStorage);
+    return () => {
+      window.removeEventListener('storage', syncThemeFromStorage);
+      window.removeEventListener('focus', syncThemeFromStorage);
+      window.removeEventListener(DASHBOARD_THEME_UPDATED_EVENT, syncThemeFromStorage);
+    };
+  }, [applyThemeCssVariables, settingsStorageScope]);
+
+  useEffect(() => {
+    const scopeKey = settingsStorageScope ?? '__default__';
+    if (appliedThemeScopeRef.current === scopeKey) {
+      return;
+    }
+    appliedThemeScopeRef.current = scopeKey;
+
+    const storedThemeMode = readScopedStorageValue(
+      DASHBOARD_THEME_MODE_STORAGE_KEY,
+      settingsStorageScope,
+    );
+    if (storedThemeMode === 'light' || storedThemeMode === 'dark') {
+      setTheme(storedThemeMode);
+    }
+  }, [setTheme, settingsStorageScope]);
+
+  useEffect(() => {
+    if (theme === 'light' || theme === 'dark') {
+      writeScopedStorageValue(DASHBOARD_THEME_MODE_STORAGE_KEY, settingsStorageScope, theme);
+    }
+  }, [settingsStorageScope, theme]);
 
   useEffect(() => {
     const syncSubmissions = () => {
@@ -1282,24 +1943,46 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    const normalizedAccent = toNeumorphicHexColor(accentColor) ?? DEFAULT_DASHBOARD_ACCENT;
-    const normalizedSecondary =
-      toNeumorphicHexColor(secondaryColor) ?? DEFAULT_DASHBOARD_SECONDARY;
+    return () => {
+      if (themeSavedNoticeTimeoutRef.current !== null) {
+        window.clearTimeout(themeSavedNoticeTimeoutRef.current);
+      }
+    };
+  }, []);
 
-    window.localStorage.setItem(DASHBOARD_ACCENT_STORAGE_KEY, normalizedAccent);
-    window.localStorage.setItem(DASHBOARD_SECONDARY_STORAGE_KEY, normalizedSecondary);
-    window.localStorage.setItem(
-      DASHBOARD_GRADIENT_ENABLED_STORAGE_KEY,
-      gradientEnabled ? '1' : '0',
-    );
-    window.localStorage.setItem(DASHBOARD_GRADIENT_DIRECTION_STORAGE_KEY, gradientDirection);
-    document.documentElement.style.setProperty('--chess-app-accent', normalizedAccent);
-    document.documentElement.style.setProperty('--chess-app-accent-secondary', normalizedSecondary);
-  }, [accentColor, gradientDirection, gradientEnabled, secondaryColor]);
+  const currentThemeSettings: ThemeSettings = useMemo(
+    () => ({
+      accentColor,
+      secondaryColor,
+      gradientEnabled,
+      gradientDirection,
+    }),
+    [accentColor, gradientDirection, gradientEnabled, secondaryColor],
+  );
+  const hasUnsavedThemeChanges =
+    currentThemeSettings.accentColor !== savedThemeSettings.accentColor ||
+    currentThemeSettings.secondaryColor !== savedThemeSettings.secondaryColor ||
+    currentThemeSettings.gradientEnabled !== savedThemeSettings.gradientEnabled ||
+    currentThemeSettings.gradientDirection !== savedThemeSettings.gradientDirection;
+
+  const handleSaveTheme = () => {
+    persistThemeSettings(currentThemeSettings);
+  };
+
+  const handleThemeReset = () => {
+    setAccentColor(DEFAULT_DASHBOARD_ACCENT);
+    setSecondaryColor(DEFAULT_DASHBOARD_SECONDARY);
+    setGradientEnabled(false);
+    setGradientDirection('top-to-bottom');
+    setThemeSavedNoticeVisible(false);
+  };
 
   const handleBackToChessApp = () => {
     if (isTransitioningToChessApp) {
       return;
+    }
+    if (hasUnsavedThemeChanges) {
+      persistThemeSettings(currentThemeSettings);
     }
     setIsTransitioningToChessApp(true);
     window.setTimeout(() => {
@@ -1360,6 +2043,10 @@ export default function DashboardPage() {
     () => buildPuzzleActivityData(activeRange, submissions),
     [activeRange, submissions],
   );
+  const puzzleActivityYAxisTicks = useMemo(
+    () => buildYAxisTicks(puzzleActivityData.values),
+    [puzzleActivityData.values],
+  );
   const eloTrendData = useMemo(
     () => buildEloTrendData(activeRange, submissions),
     [activeRange, submissions],
@@ -1390,6 +2077,24 @@ export default function DashboardPage() {
     puzzleEloValues.length > 0
       ? `Average across ${puzzleEloValues.length} submitted puzzles`
       : 'No puzzle submissions yet';
+  const recentAnalyticsSubmissions = useMemo(
+    () => submissions.slice(0, ANALYTICS_RECENT_SOLVE_LIMIT),
+    [submissions],
+  );
+  const themeAnalytics = useMemo(
+    () => buildThemeAccuracyRows(recentAnalyticsSubmissions),
+    [recentAnalyticsSubmissions],
+  );
+  const solveTimeDifficultyData = useMemo(
+    () => buildSolveTimeDifficultyData(submissions),
+    [submissions],
+  );
+  const activeAnalyticsTheme = selectedAnalyticsTheme ?? themeAnalytics.weakestTheme;
+  const selectedThemeRow =
+    themeAnalytics.rows.find((row) => row.theme === activeAnalyticsTheme) ?? themeAnalytics.rows[0];
+  const selectedThemeAssessments = selectedThemeRow?.assessments ?? [];
+  const selectedThemeLabel = selectedThemeRow?.theme ?? ANALYTICS_THEMES[0];
+  const selectedThemeSolvedCount = selectedThemeRow?.solvedCount ?? 0;
   const accentChannels = useMemo<[number, number, number]>(
     () => hexToRgbChannels(accentColor) ?? hexToRgbChannels(DEFAULT_DASHBOARD_ACCENT) ?? [122, 148, 191],
     [accentColor],
@@ -1408,8 +2113,9 @@ export default function DashboardPage() {
         secondaryChannels,
         gradientEnabled,
         gradientDirection,
+        isDark,
       ),
-    [accentChannels, gradientDirection, gradientEnabled, secondaryChannels],
+    [accentChannels, gradientDirection, gradientEnabled, isDark, secondaryChannels],
   );
   const dashboardPanelGradient = useMemo(
     () =>
@@ -1418,8 +2124,9 @@ export default function DashboardPage() {
         secondaryChannels,
         gradientEnabled,
         gradientDirection,
+        isDark,
       ),
-    [accentChannels, gradientDirection, gradientEnabled, secondaryChannels],
+    [accentChannels, gradientDirection, gradientEnabled, isDark, secondaryChannels],
   );
   const dashboardPanelStyle = dashboardPanelGradient
     ? ({
@@ -1427,6 +2134,7 @@ export default function DashboardPage() {
       } as React.CSSProperties)
     : undefined;
   const isDashboardView = activeNavLabel === 'Dashboard';
+  const isAnalyticsView = activeNavLabel === 'Analytics';
   const isSettingsView = activeNavLabel === 'Settings';
   const dashboardContainerStyle = dashboardPanelStyle;
   const dashboardButtonStyle = dashboardPanelStyle;
@@ -1440,8 +2148,12 @@ export default function DashboardPage() {
     color: 'transparent',
   };
 
+  if (!isMounted) {
+    return <main className="dashboard-theme min-h-screen p-4 md:p-8" />;
+  }
+
   return (
-    <main className="min-h-screen p-4 md:p-8" style={{ background: pageBackground }}>
+    <main className="dashboard-theme min-h-screen p-4 md:p-8" style={{ background: pageBackground }}>
       <div
         className={`mx-auto w-full max-w-[1380px] neumo-surface rounded-[36px] p-3 md:p-5 transition-all duration-300 ${
           isTransitioningToChessApp
@@ -1484,10 +2196,10 @@ export default function DashboardPage() {
                     key={item.label}
                     type="button"
                     onClick={() => setActiveNavLabel(item.label)}
-                    className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition ${
+                    className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-all duration-200 ${
                       active
-                        ? 'neumo-pill text-slate-700'
-                        : 'text-slate-500 hover:text-slate-700 hover:bg-white/30'
+                        ? 'neumo-pill text-slate-700 hover:-translate-y-[1px] hover:shadow-[0_8px_18px_rgba(15,23,42,0.12)]'
+                        : 'text-slate-500 hover:text-slate-700 hover:bg-white/30 hover:-translate-y-[1px] hover:shadow-[0_8px_18px_rgba(15,23,42,0.1)]'
                     }`}
                     style={
                       active
@@ -1499,7 +2211,7 @@ export default function DashboardPage() {
                         : dashboardButtonStyle
                     }
                   >
-                    <span className="h-8 w-8 rounded-xl neumo-inset flex items-center justify-center">
+                    <span className="h-8 w-8 rounded-xl neumo-inset flex items-center justify-center transition-transform duration-200 group-hover:scale-105">
                       <Icon className="h-4 w-4" />
                     </span>
                     <span className="text-sm font-medium">{item.label}</span>
@@ -1512,11 +2224,20 @@ export default function DashboardPage() {
               type="button"
               onClick={handleBackToChessApp}
               disabled={isTransitioningToChessApp}
-              className="mt-8 w-full neumo-pill px-4 py-2.5 text-sm font-semibold text-slate-600 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="mt-8 w-full neumo-pill px-4 py-2.5 text-sm font-semibold text-slate-600 flex items-center justify-center gap-2 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_10px_22px_rgba(15,23,42,0.14)] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
               style={dashboardButtonStyle}
             >
               <ArrowLeft className="h-4 w-4" />
               Back to Chess App
+            </button>
+            <button
+              type="button"
+              onClick={() => setTheme(isDark ? 'light' : 'dark')}
+              className="mt-3 w-full neumo-pill px-4 py-2.5 text-sm font-semibold text-slate-600 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_10px_22px_rgba(15,23,42,0.14)]"
+              style={dashboardButtonStyle}
+              aria-label="Toggle theme"
+            >
+              {isDark ? 'Dark' : 'Light'}
             </button>
           </aside>
 
@@ -1581,7 +2302,7 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => setShowSubmissionHistory(false)}
-                    className="neumo-pill px-4 py-2 text-xs font-semibold text-slate-500"
+                    className="neumo-pill px-4 py-2 text-xs font-semibold text-slate-500 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                     style={dashboardButtonStyle}
                   >
                     Hide
@@ -1594,7 +2315,11 @@ export default function DashboardPage() {
                     appear here.
                   </p>
                 ) : (
-                  <div className="mt-4 space-y-3">
+                  <div
+                    className={`mt-4 space-y-3 ${
+                      submissions.length > 2 ? 'max-h-[56rem] overflow-y-auto pr-1' : ''
+                    }`}
+                  >
                     {submissions.map((submission, index) => {
                       const submissionNumber = submissions.length - index;
                       const submissionImageSrc =
@@ -1723,7 +2448,7 @@ export default function DashboardPage() {
                       key={tab}
                       type="button"
                       onClick={() => setActiveRange(tab)}
-                      className={`px-5 py-2 text-sm font-medium rounded-full transition ${
+                      className={`px-5 py-2 text-sm font-medium rounded-full transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)] ${
                         activeRange === tab ? 'neumo-pill text-slate-700' : 'neumo-inset text-slate-500'
                       }`}
                       style={
@@ -1746,6 +2471,7 @@ export default function DashboardPage() {
                   subtitle={puzzleActivityData.subtitle}
                   values={puzzleActivityData.values}
                   axisLabels={puzzleActivityData.axisLabels}
+                  yAxisTicks={puzzleActivityYAxisTicks}
                   sectionStyle={dashboardContainerStyle}
                   buttonStyle={dashboardButtonStyle}
                 />
@@ -1760,36 +2486,456 @@ export default function DashboardPage() {
               </>
             )}
 
+            {isAnalyticsView && (
+              <section
+                className="neumo-surface-soft rounded-[26px] p-5 md:p-7"
+                style={dashboardContainerStyle}
+              >
+                <h2 className="text-3xl font-semibold tracking-tight text-slate-700">Analytics</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Performance views configured for puzzle-solving insights.
+                </p>
+
+                {isAnalyticsSectionsOpen ? (
+                  <div className="mt-5 grid gap-4 xl:grid-cols-3">
+                    <article
+                      className="neumo-surface-soft rounded-3xl px-5 py-5 xl:col-span-2"
+                      style={dashboardContainerStyle}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">
+                            Analytics
+                          </p>
+                          <h3 className="mt-1 text-xl font-semibold text-slate-700">Accuracy by Theme</h3>
+                          <p className="mt-1 text-sm text-slate-500">
+                            Dynamic accuracy from the last {recentAnalyticsSubmissions.length} solved
+                            puzzles.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-full neumo-pill px-3 py-1 text-xs font-semibold text-amber-600">
+                            Weakest: {themeAnalytics.weakestTheme}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setIsAnalyticsSectionsOpen(false)}
+                            className="rounded-full neumo-pill px-3 py-1 text-xs font-semibold text-slate-600 inline-flex items-center gap-1.5 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+                            style={dashboardButtonStyle}
+                            aria-expanded={isAnalyticsSectionsOpen}
+                            aria-label="Collapse analytics sections"
+                          >
+                            <ChevronUp className="h-3.5 w-3.5" />
+                            Collapse
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 space-y-3">
+                        {themeAnalytics.rows.map((row) => {
+                          const isActive = row.theme === selectedThemeLabel;
+                          const isWeakest = row.theme === themeAnalytics.weakestTheme;
+                          const paletteColorHex =
+                            ACCURACY_THEME_NEON_SWATCH_COLORS[
+                              ANALYTICS_THEMES.indexOf(row.theme) %
+                                ACCURACY_THEME_NEON_SWATCH_COLORS.length
+                            ];
+                          const paletteColorChannels =
+                            hexToRgbChannels(paletteColorHex) ?? accentChannels;
+                          return (
+                            <button
+                              key={row.theme}
+                              type="button"
+                              onClick={() => setSelectedAnalyticsTheme(row.theme)}
+                              className={`w-full rounded-2xl px-4 py-3 text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.1)] ${
+                                isActive ? 'neumo-pill' : 'neumo-inset hover:bg-white/35'
+                              }`}
+                              style={
+                                isActive
+                                  ? {
+                                      ...(dashboardButtonStyle ?? {}),
+                                      color: rgbaFromChannels(paletteColorChannels, 0.95),
+                                      background: `linear-gradient(135deg, ${rgbaFromChannels(paletteColorChannels, 0.24)} 0%, rgba(255, 255, 255, 0.74) 100%)`,
+                                    }
+                                  : dashboardButtonStyle
+                              }
+                            >
+                              <div className="flex items-center gap-3">
+                                <span
+                                  className="h-3 w-3 shrink-0 rounded-full"
+                                  style={{
+                                    background: `linear-gradient(135deg, ${rgbaFromChannels(paletteColorChannels, 0.98)} 0%, ${rgbaFromChannels(paletteColorChannels, 0.72)} 100%)`,
+                                    boxShadow: `inset 1px 1px 2px rgba(255,255,255,0.45), 2px 2px 4px rgba(15,23,42,0.16), 0 0 8px ${rgbaFromChannels(paletteColorChannels, 0.42)}`,
+                                  }}
+                                />
+                                <span className="w-[118px] text-sm font-medium text-slate-700">
+                                  {row.theme}
+                                </span>
+                                <div
+                                  className="relative h-4 flex-1 overflow-hidden rounded-full"
+                                  style={{
+                                    background: `linear-gradient(180deg, rgba(255,255,255,0.82) 0%, ${rgbaFromChannels(paletteColorChannels, 0.12)} 100%)`,
+                                    boxShadow: `inset 7px 7px 12px rgba(15,23,42,0.16), inset -7px -7px 12px rgba(255,255,255,0.9), 0 0 10px ${rgbaFromChannels(paletteColorChannels, 0.14)}`,
+                                  }}
+                                >
+                                  <span
+                                    className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-300"
+                                    style={{
+                                      width: `${row.accuracyPercent}%`,
+                                      background: `linear-gradient(90deg, ${rgbaFromChannels(paletteColorChannels, 0.99)} 0%, ${rgbaFromChannels(paletteColorChannels, 0.9)} 58%, ${rgbaFromChannels(paletteColorChannels, 0.72)} 100%)`,
+                                      boxShadow: `inset 1px 1px 2px rgba(255,255,255,0.32), 3px 3px 8px ${rgbaFromChannels(paletteColorChannels, 0.36)}, 0 0 10px ${rgbaFromChannels(paletteColorChannels, 0.34)}`,
+                                    }}
+                                  />
+                                </div>
+                                <span className="w-14 text-right text-sm font-semibold text-slate-700">
+                                  {row.accuracyPercent}%
+                                </span>
+                              </div>
+                              <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-slate-400">
+                                <span>
+                                  {row.solvedCount > 0
+                                    ? `${row.solvedCount} recent solved puzzle${row.solvedCount === 1 ? '' : 's'}`
+                                    : 'No recent solved puzzles tagged yet'}
+                                </span>
+                                {isWeakest && (
+                                  <span className="font-semibold uppercase tracking-[0.08em] text-amber-600">
+                                    Weakest
+                                  </span>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </article>
+
+                    <div className="space-y-3">
+                      {ANALYTICS_SECONDARY_SUBSECTIONS.map((title) =>
+                        title === 'Solve Time vs Difficulty' ? (
+                          isSolveTimeSectionOpen ? (
+                            <SolveTimeVsDifficultyChart
+                              key={title}
+                              data={solveTimeDifficultyData}
+                              sectionStyle={dashboardContainerStyle}
+                              accentChannels={accentChannels}
+                              onCollapse={() => setIsSolveTimeSectionOpen(false)}
+                            />
+                          ) : (
+                            <button
+                              key={title}
+                              type="button"
+                              onClick={() => setIsSolveTimeSectionOpen(true)}
+                              className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+                              style={dashboardContainerStyle}
+                              aria-expanded={false}
+                              aria-label="Expand solve time vs difficulty section"
+                            >
+                              <div>
+                                <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">
+                                  Analytics
+                                </p>
+                                <h3 className="mt-1 text-base font-semibold text-slate-700">
+                                  Solve Time vs Difficulty
+                                </h3>
+                              </div>
+                              <p className="text-xs text-slate-400 inline-flex items-center gap-1.5">
+                                <ChevronDown className="h-3.5 w-3.5" />
+                                Click to expand
+                              </p>
+                            </button>
+                          )
+                        ) : (
+                          <article
+                            key={title}
+                            className="neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between"
+                            style={dashboardContainerStyle}
+                          >
+                            <div>
+                              <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">
+                                Analytics
+                              </p>
+                              <h3 className="mt-1 text-base font-semibold text-slate-700">{title}</h3>
+                            </div>
+                            <p className="text-xs text-slate-400">Ready for chart and metric bindings.</p>
+                          </article>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsAnalyticsSectionsOpen(true)}
+                      className="neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+                      style={dashboardContainerStyle}
+                      aria-expanded={false}
+                      aria-label="Expand accuracy by theme section"
+                    >
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Analytics</p>
+                        <h3 className="mt-1 text-base font-semibold text-slate-700">Accuracy by Theme</h3>
+                      </div>
+                      <p className="text-xs text-slate-400 inline-flex items-center gap-1.5">
+                        <ChevronDown className="h-3.5 w-3.5" />
+                        Click to expand
+                      </p>
+                    </button>
+                    {ANALYTICS_SECONDARY_SUBSECTIONS.map((title) =>
+                      title === 'Solve Time vs Difficulty' ? (
+                        isSolveTimeSectionOpen ? (
+                          <SolveTimeVsDifficultyChart
+                            key={title}
+                            data={solveTimeDifficultyData}
+                            sectionStyle={dashboardContainerStyle}
+                            accentChannels={accentChannels}
+                            onCollapse={() => setIsSolveTimeSectionOpen(false)}
+                          />
+                        ) : (
+                          <button
+                            key={title}
+                            type="button"
+                            onClick={() => setIsSolveTimeSectionOpen(true)}
+                            className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+                            style={dashboardContainerStyle}
+                            aria-expanded={false}
+                            aria-label="Expand solve time vs difficulty section"
+                          >
+                            <div>
+                              <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">
+                                Analytics
+                              </p>
+                              <h3 className="mt-1 text-base font-semibold text-slate-700">
+                                Solve Time vs Difficulty
+                              </h3>
+                            </div>
+                            <p className="text-xs text-slate-400 inline-flex items-center gap-1.5">
+                              <ChevronDown className="h-3.5 w-3.5" />
+                              Click to expand
+                            </p>
+                          </button>
+                        )
+                      ) : (
+                        <article
+                          key={title}
+                          className="neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between"
+                          style={dashboardContainerStyle}
+                        >
+                          <div>
+                            <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">
+                              Analytics
+                            </p>
+                            <h3 className="mt-1 text-base font-semibold text-slate-700">{title}</h3>
+                          </div>
+                          <p className="text-xs text-slate-400">Ready for chart and metric bindings.</p>
+                        </article>
+                      ),
+                    )}
+                  </div>
+                )}
+
+                {isAnalyticsSectionsOpen && (
+                  <section className="mt-5 rounded-3xl neumo-inset px-4 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-xl font-semibold text-slate-700">
+                        Associated Puzzles: {selectedThemeLabel}
+                      </h3>
+                      <p className="text-sm text-slate-500">
+                        Recently solved submissions mapped to this theme.
+                      </p>
+                    </div>
+                    <span className="rounded-full neumo-pill px-3 py-1 text-xs font-semibold text-slate-600">
+                      {selectedThemeSolvedCount} puzzle{selectedThemeSolvedCount === 1 ? '' : 's'}
+                    </span>
+                  </div>
+
+                  {selectedThemeAssessments.length === 0 ? (
+                    <p className="mt-4 rounded-2xl neumo-inset px-4 py-4 text-sm text-slate-500">
+                      No recent solved puzzles are currently mapped to this theme. Solve more puzzles
+                      and this section will update automatically.
+                    </p>
+                  ) : (
+                    <div
+                      className={`mt-4 space-y-3 ${
+                        selectedThemeAssessments.length > 2 ? 'max-h-[56rem] overflow-y-auto pr-1' : ''
+                      }`}
+                    >
+                      {selectedThemeAssessments.map(({ submission, accuracyPercent, reason }) => {
+                        const submissionImageSrc =
+                          typeof submission.originalPuzzleImageDataUrl === 'string' &&
+                          submission.originalPuzzleImageDataUrl.startsWith('data:image/')
+                            ? submission.originalPuzzleImageDataUrl
+                            : null;
+                        const hasSubmissionImage = Boolean(submissionImageSrc);
+                        const submissionImageAlt = `Theme puzzle image for ${
+                          submission.fileName || 'submission'
+                        }`;
+
+                        return (
+                          <article
+                            key={`${selectedThemeLabel}-${submission.id}`}
+                            className="rounded-2xl neumo-surface-soft px-4 py-4 text-sm text-slate-600"
+                            style={dashboardContainerStyle}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <p className="font-semibold text-slate-700">
+                                  {submission.fileName || 'Untitled puzzle'}
+                                </p>
+                                <p className="text-xs text-slate-500">{formatDateTime(submission.submittedAt)}</p>
+                              </div>
+                              <div className="text-right text-xs text-slate-500">
+                                <p>
+                                  Accuracy contribution:{' '}
+                                  <span className="font-semibold text-slate-700">{accuracyPercent}%</span>
+                                </p>
+                                <p className="mt-0.5">{reason}</p>
+                              </div>
+                            </div>
+
+                            {hasSubmissionImage && (
+                              <div className="mt-3">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setExpandedSubmissionId((previous) =>
+                                      previous === submission.id ? null : submission.id,
+                                    );
+                                  }}
+                                  className="group inline-flex flex-col items-start gap-2 rounded-lg"
+                                  aria-label={`Expand puzzle image for ${submission.fileName || 'submission'}`}
+                                >
+                                  <div className="relative h-24 w-24 overflow-hidden rounded-lg border border-slate-200/90 bg-slate-100 sm:h-28 sm:w-28">
+                                    <img
+                                      src={submissionImageSrc!}
+                                      alt={submissionImageAlt}
+                                      className="h-full w-full object-contain p-1 transition group-hover:scale-[1.02]"
+                                    />
+                                  </div>
+                                  <span className="text-[11px] uppercase tracking-[0.08em] text-slate-400">
+                                    {expandedSubmissionId === submission.id
+                                      ? 'Click image to collapse'
+                                      : 'Click image to expand'}
+                                  </span>
+                                </button>
+                              </div>
+                            )}
+
+                            {hasSubmissionImage && expandedSubmissionId === submission.id && (
+                              <div
+                                className="mt-3 w-full overflow-hidden rounded-xl border border-slate-200/90 bg-slate-100 p-2"
+                                style={{ height: '50vh', minHeight: 220, maxHeight: 620 }}
+                              >
+                                <img
+                                  src={submissionImageSrc!}
+                                  alt={submissionImageAlt}
+                                  className="h-full w-full object-contain"
+                                />
+                              </div>
+                            )}
+
+                            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                              <p>
+                                <span className="text-slate-400">Expected side:</span>{' '}
+                                <span className="font-medium text-slate-700">
+                                  {submission.expectedSideToMove}
+                                </span>
+                              </p>
+                              <p>
+                                <span className="text-slate-400">Detected side:</span>{' '}
+                                <span className="font-medium text-slate-700">
+                                  {submission.positionCheck.sideToMove ?? 'Unavailable'}
+                                </span>
+                              </p>
+                              <p>
+                                <span className="text-slate-400">Vision confidence:</span>{' '}
+                                <span className="font-medium text-slate-700">
+                                  {formatConfidence(submission.positionCheck.confidence)}
+                                </span>
+                              </p>
+                              <p>
+                                <span className="text-slate-400">Solve time:</span>{' '}
+                                <span className="font-medium text-slate-700">
+                                  {typeof submission.solveTimeMs === 'number'
+                                    ? formatSolveTimeMs(submission.solveTimeMs)
+                                    : 'Unavailable'}
+                                </span>
+                              </p>
+                              <p>
+                                <span className="text-slate-400">Estimated Elo:</span>{' '}
+                                <span className="font-medium text-slate-700">
+                                  {resolveSubmissionElo(submission)}
+                                </span>
+                              </p>
+                              <p>
+                                <span className="text-slate-400">Mate status:</span>{' '}
+                                <span className="font-medium text-slate-700">
+                                  {formatMateStatus(submission)}
+                                </span>
+                              </p>
+                            </div>
+
+                            {submission.solutionLines.length > 0 && (
+                              <div className="mt-3 rounded-xl bg-white/50 px-3 py-3">
+                                <p className="text-xs uppercase tracking-[0.08em] text-slate-400">Solution</p>
+                                <p className="mt-2 text-sm font-medium text-slate-700">
+                                  {submission.solutionLines.join(' | ')}
+                                </p>
+                              </div>
+                            )}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                  </section>
+                )}
+              </section>
+            )}
+
             {isSettingsView && (
               <SettingsPanel
+                isDark={isDark}
                 accentColor={accentColor}
                 accentChannels={accentChannels}
                 secondaryColor={secondaryColor}
                 secondaryChannels={secondaryChannels}
                 gradientEnabled={gradientEnabled}
                 gradientDirection={gradientDirection}
-                onAccentChange={(nextColor) =>
-                  setAccentColor(toNeumorphicHexColor(nextColor) ?? DEFAULT_DASHBOARD_ACCENT)
-                }
-                onSecondaryColorChange={(nextColor) =>
-                  setSecondaryColor(
-                    toNeumorphicHexColor(nextColor) ?? DEFAULT_DASHBOARD_SECONDARY,
-                  )
-                }
-                onGradientEnabledChange={setGradientEnabled}
-                onGradientDirectionChange={setGradientDirection}
-                onAccentReset={() => {
-                  setAccentColor(DEFAULT_DASHBOARD_ACCENT);
-                  setSecondaryColor(DEFAULT_DASHBOARD_SECONDARY);
-                  setGradientEnabled(false);
-                  setGradientDirection('top-to-bottom');
+                onThemeModeChange={(mode) => {
+                  setTheme(mode);
                 }}
+                onAccentChange={(nextColor) => {
+                  setThemeSavedNoticeVisible(false);
+                  setAccentColor(normalizeHexColor(nextColor) ?? DEFAULT_DASHBOARD_ACCENT);
+                }}
+                onSecondaryColorChange={(nextColor) =>
+                  {
+                    setThemeSavedNoticeVisible(false);
+                    setSecondaryColor(
+                      normalizeHexColor(nextColor) ?? DEFAULT_DASHBOARD_SECONDARY,
+                    );
+                  }
+                }
+                onGradientEnabledChange={(enabled) => {
+                  setThemeSavedNoticeVisible(false);
+                  setGradientEnabled(enabled);
+                }}
+                onGradientDirectionChange={(direction) => {
+                  setThemeSavedNoticeVisible(false);
+                  setGradientDirection(direction);
+                }}
+                onAccentReset={handleThemeReset}
+                onSaveTheme={handleSaveTheme}
+                hasUnsavedThemeChanges={hasUnsavedThemeChanges}
+                themeSavedNoticeVisible={themeSavedNoticeVisible}
                 sectionStyle={dashboardContainerStyle}
                 buttonStyle={dashboardButtonStyle}
               />
             )}
 
-            {!isDashboardView && !isSettingsView && (
+            {!isDashboardView && !isAnalyticsView && !isSettingsView && (
               <section
                 className="neumo-surface-soft rounded-[26px] p-5 md:p-7"
                 style={dashboardContainerStyle}

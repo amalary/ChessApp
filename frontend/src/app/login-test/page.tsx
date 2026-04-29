@@ -3,6 +3,7 @@
 import React, { useState, useSyncExternalStore } from "react";
 import { Castle } from "lucide-react";
 import SolveTestClient from "../solve-test/solve-test-client";
+import { writeActiveLocalAuthUser } from "@/lib/dashboard-theme-settings";
 
 function subscribe() {
   return () => {};
@@ -16,7 +17,9 @@ type AuthApiResponse = {
   message?: unknown;
   detail?: unknown;
   user?: {
+    id?: unknown;
     username?: unknown;
+    email?: unknown;
   };
 };
 
@@ -111,6 +114,11 @@ export default function LoginTestPage() {
         data,
         authMode === "signup" ? "Signup successful." : "Login successful.",
       );
+      writeActiveLocalAuthUser({
+        id: typeof data.user?.id === "string" ? data.user.id : null,
+        username: typeof data.user?.username === "string" ? data.user.username : null,
+        email: typeof data.user?.email === "string" ? data.user.email : null,
+      });
       setStatusMessage(apiMessage);
       setIsLoggedIn(true);
     } catch (error: unknown) {

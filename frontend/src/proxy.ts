@@ -1,4 +1,4 @@
-import { auth0 } from './lib/auth0';
+import { auth0 } from '../lib/auth0';
 
 // Next.js 16 proxy entrypoint that mounts the Auth0 SDK routes.
 export async function proxy(request: Request) {
@@ -11,4 +11,3 @@ export const config = {
     '/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)'
   ]
 };
-

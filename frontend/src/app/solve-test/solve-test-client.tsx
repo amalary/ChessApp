@@ -1,318 +1,44 @@
 'use client';
 
-import React, { useEffect, useId, useMemo, useState } from 'react';
+import React, { useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
+import { useUser } from '@auth0/nextjs-auth0/client';
 import { useTheme } from 'next-themes';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { Crown, LayoutDashboard } from 'lucide-react';
+import { CheckCircle2, Crown, LayoutDashboard } from 'lucide-react';
 import {
   addPuzzleSubmission,
   estimatePuzzleElo,
   getPuzzleSubmissionUpdateEventName,
   getUnseenPuzzleSubmissionCount,
 } from '@/lib/puzzle-submissions';
+import {
+  readScopedStorageValue,
+  resolveUserSettingsScope,
+  writeScopedStorageValue,
+} from '@/lib/dashboard-theme-settings';
+import {
+  buildDashboardBackground,
+  buildPanelGradientBackground,
+  DEFAULT_DASHBOARD_ACCENT,
+  DEFAULT_DASHBOARD_SECONDARY,
+  extractSolutionLines,
+  extractSolveMeta,
+  formatConfidence,
+  GradientDirection,
+  hexToRgbChannels,
+  isSuccessfulSolve,
+  normalizeHexColor,
+  SolveMeta,
+  SolveResponse,
+} from './solve-test-utils';
 
-type SolveResponse = {
-  solution_line?: unknown;
-  moves_san?: unknown;
-  mate_found?: unknown;
-  mate_in?: unknown;
-  vision_confidence?: unknown;
-  vision_side_to_move?: unknown;
-  vision_attempts_used?: unknown;
-  error?: unknown;
-  detail?: unknown;
-};
-
-type SolveMeta = {
-  sideToMove: 'white' | 'black' | null;
-  confidence: number | null;
-  attemptsUsed: number | null;
-  mateFound: boolean | null;
-  mateIn: number | null;
-};
-
-const DEFAULT_DASHBOARD_ACCENT = '#7A94BF';
-const DEFAULT_DASHBOARD_SECONDARY = '#A58EB4';
 const DASHBOARD_ACCENT_STORAGE_KEY = 'chessapp.dashboard.accent';
 const DASHBOARD_SECONDARY_STORAGE_KEY = 'chessapp.dashboard.secondary';
 const DASHBOARD_GRADIENT_ENABLED_STORAGE_KEY = 'chessapp.dashboard.gradient.enabled';
 const DASHBOARD_GRADIENT_DIRECTION_STORAGE_KEY = 'chessapp.dashboard.gradient.direction';
-
-type GradientDirection = 'top-to-bottom' | 'diagonal' | 'bottom-to-top';
-
-function toText(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function toFiniteNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return null;
-}
-
-function toBoolean(value: unknown): boolean | null {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  return null;
-}
-
-function normalizeHexColor(value: string | null | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const normalized = value.trim();
-  if (!/^#[0-9a-fA-F]{6}$/.test(normalized)) {
-    return null;
-  }
-
-  return normalized.toUpperCase();
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function rgbToHsl(red: number, green: number, blue: number): [number, number, number] {
-  const r = red / 255;
-  const g = green / 255;
-  const b = blue / 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const chroma = max - min;
-  const lightness = (max + min) / 2;
-  let hue = 0;
-  let saturation = 0;
-
-  if (chroma > 0) {
-    saturation = chroma / (1 - Math.abs(2 * lightness - 1));
-    if (max === r) {
-      hue = ((g - b) / chroma + (g < b ? 6 : 0)) * 60;
-    } else if (max === g) {
-      hue = ((b - r) / chroma + 2) * 60;
-    } else {
-      hue = ((r - g) / chroma + 4) * 60;
-    }
-  }
-
-  return [hue, saturation * 100, lightness * 100];
-}
-
-function hslToRgb(hue: number, saturation: number, lightness: number): [number, number, number] {
-  const h = ((hue % 360) + 360) % 360;
-  const s = clamp(saturation, 0, 100) / 100;
-  const l = clamp(lightness, 0, 100) / 100;
-  const chroma = (1 - Math.abs(2 * l - 1)) * s;
-  const huePrime = h / 60;
-  const x = chroma * (1 - Math.abs((huePrime % 2) - 1));
-  let r1 = 0;
-  let g1 = 0;
-  let b1 = 0;
-
-  if (huePrime >= 0 && huePrime < 1) {
-    r1 = chroma;
-    g1 = x;
-  } else if (huePrime < 2) {
-    r1 = x;
-    g1 = chroma;
-  } else if (huePrime < 3) {
-    g1 = chroma;
-    b1 = x;
-  } else if (huePrime < 4) {
-    g1 = x;
-    b1 = chroma;
-  } else if (huePrime < 5) {
-    r1 = x;
-    b1 = chroma;
-  } else {
-    r1 = chroma;
-    b1 = x;
-  }
-
-  const match = l - chroma / 2;
-  return [
-    Math.round((r1 + match) * 255),
-    Math.round((g1 + match) * 255),
-    Math.round((b1 + match) * 255),
-  ];
-}
-
-function rgbChannelsToHex(channels: [number, number, number]): string {
-  return `#${channels.map((channel) => clamp(Math.round(channel), 0, 255).toString(16).padStart(2, '0')).join('')}`.toUpperCase();
-}
-
-function hexToRgbChannels(hexColor: string): [number, number, number] | null {
-  const normalized = normalizeHexColor(hexColor);
-  if (!normalized) {
-    return null;
-  }
-
-  const value = normalized.slice(1);
-  return [
-    Number.parseInt(value.slice(0, 2), 16),
-    Number.parseInt(value.slice(2, 4), 16),
-    Number.parseInt(value.slice(4, 6), 16),
-  ];
-}
-
-function toNeumorphicHexColor(value: string | null | undefined): string | null {
-  const normalized = normalizeHexColor(value);
-  if (!normalized) {
-    return null;
-  }
-
-  const channels = hexToRgbChannels(normalized);
-  if (!channels) {
-    return null;
-  }
-
-  const [hue, saturation, lightness] = rgbToHsl(channels[0], channels[1], channels[2]);
-  const neumoSaturation = clamp(24 + saturation * 0.38, 24, 58);
-  const neumoLightness = clamp(60 + (lightness - 50) * 0.2, 54, 74);
-  const neumoChannels = hslToRgb(hue, neumoSaturation, neumoLightness);
-  return rgbChannelsToHex(neumoChannels);
-}
-
-function rgbaFromChannels(channels: [number, number, number], alpha: number): string {
-  return `rgba(${channels[0]}, ${channels[1]}, ${channels[2]}, ${alpha})`;
-}
-
-function resolveGradientAngle(direction: GradientDirection): string {
-  if (direction === 'top-to-bottom') {
-    return '180deg';
-  }
-  if (direction === 'bottom-to-top') {
-    return '0deg';
-  }
-  return '135deg';
-}
-
-function buildDashboardBackground(
-  primary: [number, number, number],
-  secondary: [number, number, number],
-  gradientEnabled: boolean,
-  gradientDirection: GradientDirection,
-): string {
-  if (!gradientEnabled) {
-    return `radial-gradient(1200px circle at 18% 18%, rgba(255,255,255,0.85), rgba(237,242,250,0) 60%), radial-gradient(940px circle at 88% 8%, ${rgbaFromChannels(primary, 0.2)}, rgba(255,255,255,0) 56%), linear-gradient(180deg, #dfe6f1 0%, #d9e2ef 100%)`;
-  }
-
-  const gradientAngle = resolveGradientAngle(gradientDirection);
-  return `radial-gradient(1200px circle at 18% 18%, rgba(255,255,255,0.78), rgba(237,242,250,0) 60%), radial-gradient(940px circle at 88% 8%, ${rgbaFromChannels(primary, 0.24)}, rgba(255,255,255,0) 56%), linear-gradient(${gradientAngle}, ${rgbaFromChannels(primary, 0.52)} 0%, ${rgbaFromChannels(secondary, 0.56)} 100%), linear-gradient(180deg, #dfe6f1 0%, #d9e2ef 100%)`;
-}
-
-function buildPanelGradientBackground(
-  primary: [number, number, number],
-  secondary: [number, number, number],
-  gradientEnabled: boolean,
-  gradientDirection: GradientDirection,
-): string | undefined {
-  if (!gradientEnabled) {
-    return undefined;
-  }
-
-  const gradientAngle = resolveGradientAngle(gradientDirection);
-  return `linear-gradient(${gradientAngle}, ${rgbaFromChannels(primary, 0.26)} 0%, ${rgbaFromChannels(secondary, 0.3)} 100%), linear-gradient(180deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.08) 100%), rgb(var(--surface))`;
-}
-
-function normalizeSide(value: unknown): 'white' | 'black' | null {
-  const text = toText(value)?.toLowerCase();
-  if (!text) {
-    return null;
-  }
-  if (text === 'white' || text === 'w') {
-    return 'white';
-  }
-  if (text === 'black' || text === 'b') {
-    return 'black';
-  }
-  return null;
-}
-
-function extractSolveMeta(data: SolveResponse): SolveMeta {
-  const rawConfidence = toFiniteNumber(data.vision_confidence);
-  const normalizedConfidence =
-    rawConfidence === null
-      ? null
-      : Math.max(0, Math.min(1, rawConfidence > 1 ? rawConfidence / 100 : rawConfidence));
-
-  const rawMateIn = toFiniteNumber(data.mate_in);
-  const mateIn =
-    rawMateIn !== null && Number.isInteger(rawMateIn) && rawMateIn >= 1 ? rawMateIn : null;
-
-  const rawAttempts = toFiniteNumber(data.vision_attempts_used);
-  const attemptsUsed =
-    rawAttempts !== null && Number.isInteger(rawAttempts) && rawAttempts >= 1 ? rawAttempts : null;
-
-  return {
-    sideToMove: normalizeSide(data.vision_side_to_move),
-    confidence: normalizedConfidence,
-    attemptsUsed,
-    mateFound: toBoolean(data.mate_found),
-    mateIn,
-  };
-}
-
-function formatConfidence(confidence: number | null): string {
-  if (confidence === null) {
-    return 'Unavailable';
-  }
-  return `${(confidence * 100).toFixed(1)}%`;
-}
-
-function extractSolutionLines(data: SolveResponse): string[] {
-  if (typeof data.solution_line === 'string' && data.solution_line.trim()) {
-    return [data.solution_line.trim()];
-  }
-
-  const moves = Array.isArray(data.moves_san)
-    ? data.moves_san.filter((m): m is string => typeof m === 'string')
-    : [];
-
-  if (moves.length > 0) {
-    const singleLine = moves.length === 1 ? moves[0] : moves.join(' ');
-    return [singleLine];
-  }
-
-  if (data.mate_found === false) {
-    return ['No forced mate found in the search range.'];
-  }
-
-  if (typeof data.detail === 'string') {
-    return [data.detail];
-  }
-
-  return ['No mate solution returned.'];
-}
-
-function isSuccessfulSolve(data: SolveResponse): boolean {
-  if (data.mate_found === true) {
-    return true;
-  }
-
-  if (typeof data.solution_line === 'string' && data.solution_line.trim()) {
-    return true;
-  }
-
-  if (Array.isArray(data.moves_san)) {
-    return data.moves_san.some((move) => typeof move === 'string' && move.trim().length > 0);
-  }
-
-  return false;
-}
+const DASHBOARD_THEME_MODE_STORAGE_KEY = 'chessapp.dashboard.theme.mode';
+const DASHBOARD_THEME_UPDATED_EVENT = 'chessapp.dashboard.theme.updated';
 
 function loadImageFromObjectUrl(objectUrl: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -361,7 +87,13 @@ async function createSubmissionImageDataUrl(file: File): Promise<string | null> 
 
 export default function SolveTestClient() {
   const { theme, setTheme, resolvedTheme } = useTheme();
+  const { user } = useUser();
   const router = useRouter();
+  const isMounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   const isDark = theme === 'dark' || (theme === 'system' && resolvedTheme === 'dark');
   const fileInputId = useId();
 
@@ -372,48 +104,22 @@ export default function SolveTestClient() {
   const [solveMeta, setSolveMeta] = useState<SolveMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState<'idle' | 'sending' | 'done' | 'returning'>('idle');
+  const [visibleSolutionCount, setVisibleSolutionCount] = useState(0);
+  const [visibleMetaCount, setVisibleMetaCount] = useState(0);
+  const [showLowConfidenceHint, setShowLowConfidenceHint] = useState(false);
 
   const [queenIsWhite, setQueenIsWhite] = useState(true);
   const [isTransitioningToDashboard, setIsTransitioningToDashboard] = useState(false);
   const [unseenSubmissionCount, setUnseenSubmissionCount] = useState(0);
-  const [accentColor, setAccentColor] = useState<string>(() => {
-    if (typeof window === 'undefined') {
-      return DEFAULT_DASHBOARD_ACCENT;
-    }
-    return (
-      toNeumorphicHexColor(window.localStorage.getItem(DASHBOARD_ACCENT_STORAGE_KEY)) ??
-      DEFAULT_DASHBOARD_ACCENT
-    );
-  });
-  const [secondaryColor, setSecondaryColor] = useState<string>(() => {
-    if (typeof window === 'undefined') {
-      return DEFAULT_DASHBOARD_SECONDARY;
-    }
-    return (
-      toNeumorphicHexColor(window.localStorage.getItem(DASHBOARD_SECONDARY_STORAGE_KEY)) ??
-      DEFAULT_DASHBOARD_SECONDARY
-    );
-  });
-  const [gradientEnabled, setGradientEnabled] = useState<boolean>(() => {
-    if (typeof window === 'undefined') {
-      return false;
-    }
-    return window.localStorage.getItem(DASHBOARD_GRADIENT_ENABLED_STORAGE_KEY) === '1';
-  });
-  const [gradientDirection, setGradientDirection] = useState<GradientDirection>(() => {
-    if (typeof window === 'undefined') {
-      return 'top-to-bottom';
-    }
-    const storedDirection = window.localStorage.getItem(DASHBOARD_GRADIENT_DIRECTION_STORAGE_KEY);
-    if (
-      storedDirection === 'top-to-bottom' ||
-      storedDirection === 'diagonal' ||
-      storedDirection === 'bottom-to-top'
-    ) {
-      return storedDirection;
-    }
-    return 'top-to-bottom';
-  });
+  const [accentColor, setAccentColor] = useState<string>(DEFAULT_DASHBOARD_ACCENT);
+  const [secondaryColor, setSecondaryColor] = useState<string>(DEFAULT_DASHBOARD_SECONDARY);
+  const [gradientEnabled, setGradientEnabled] = useState<boolean>(false);
+  const [gradientDirection, setGradientDirection] = useState<GradientDirection>('top-to-bottom');
+  const [settingsStorageScope, setSettingsStorageScope] = useState<string | null>(null);
+  const appliedThemeScopeRef = React.useRef<string | null>(null);
+  const submitStatusReturnTimerRef = React.useRef<number | null>(null);
+  const submitStatusResetTimerRef = React.useRef<number | null>(null);
 
   useEffect(() => {
     if (!file) {
@@ -443,38 +149,161 @@ export default function SolveTestClient() {
   }, []);
 
   useEffect(() => {
+    const syncSettingsScope = () => {
+      setSettingsStorageScope(resolveUserSettingsScope(user?.sub ?? null));
+    };
+
+    syncSettingsScope();
+    window.addEventListener('storage', syncSettingsScope);
+    window.addEventListener('focus', syncSettingsScope);
+    return () => {
+      window.removeEventListener('storage', syncSettingsScope);
+      window.removeEventListener('focus', syncSettingsScope);
+    };
+  }, [user?.sub]);
+
+  useEffect(() => {
     const syncThemeFromStorage = () => {
-      setAccentColor(
-        toNeumorphicHexColor(window.localStorage.getItem(DASHBOARD_ACCENT_STORAGE_KEY)) ??
-          DEFAULT_DASHBOARD_ACCENT,
+      const nextAccent =
+        normalizeHexColor(readScopedStorageValue(DASHBOARD_ACCENT_STORAGE_KEY, settingsStorageScope)) ??
+        DEFAULT_DASHBOARD_ACCENT;
+      const nextSecondary =
+        normalizeHexColor(
+          readScopedStorageValue(DASHBOARD_SECONDARY_STORAGE_KEY, settingsStorageScope),
+        ) ?? DEFAULT_DASHBOARD_SECONDARY;
+      const nextGradientEnabled =
+        readScopedStorageValue(DASHBOARD_GRADIENT_ENABLED_STORAGE_KEY, settingsStorageScope) === '1';
+      setAccentColor((previous) => (previous === nextAccent ? previous : nextAccent));
+      setSecondaryColor((previous) => (previous === nextSecondary ? previous : nextSecondary));
+      setGradientEnabled((previous) =>
+        previous === nextGradientEnabled ? previous : nextGradientEnabled,
       );
-      setSecondaryColor(
-        toNeumorphicHexColor(window.localStorage.getItem(DASHBOARD_SECONDARY_STORAGE_KEY)) ??
-          DEFAULT_DASHBOARD_SECONDARY,
+      const storedDirection = readScopedStorageValue(
+        DASHBOARD_GRADIENT_DIRECTION_STORAGE_KEY,
+        settingsStorageScope,
       );
-      setGradientEnabled(
-        window.localStorage.getItem(DASHBOARD_GRADIENT_ENABLED_STORAGE_KEY) === '1',
-      );
-      const storedDirection = window.localStorage.getItem(DASHBOARD_GRADIENT_DIRECTION_STORAGE_KEY);
       if (
         storedDirection === 'top-to-bottom' ||
         storedDirection === 'diagonal' ||
         storedDirection === 'bottom-to-top'
       ) {
-        setGradientDirection(storedDirection);
+        setGradientDirection((previous) => (previous === storedDirection ? previous : storedDirection));
       } else {
-        setGradientDirection('top-to-bottom');
+        setGradientDirection((previous) => (previous === 'top-to-bottom' ? previous : 'top-to-bottom'));
       }
     };
 
     syncThemeFromStorage();
     window.addEventListener('storage', syncThemeFromStorage);
     window.addEventListener('focus', syncThemeFromStorage);
+    window.addEventListener(DASHBOARD_THEME_UPDATED_EVENT, syncThemeFromStorage);
     return () => {
       window.removeEventListener('storage', syncThemeFromStorage);
       window.removeEventListener('focus', syncThemeFromStorage);
+      window.removeEventListener(DASHBOARD_THEME_UPDATED_EVENT, syncThemeFromStorage);
     };
-  }, []);
+  }, [settingsStorageScope]);
+
+  useEffect(() => {
+    if (submitStatus !== 'done') {
+      return;
+    }
+    if (submitStatusReturnTimerRef.current !== null) {
+      window.clearTimeout(submitStatusReturnTimerRef.current);
+    }
+    if (submitStatusResetTimerRef.current !== null) {
+      window.clearTimeout(submitStatusResetTimerRef.current);
+    }
+    submitStatusReturnTimerRef.current = window.setTimeout(() => {
+      setSubmitStatus('returning');
+      submitStatusReturnTimerRef.current = null;
+    }, 3400);
+    submitStatusResetTimerRef.current = window.setTimeout(() => {
+      setSubmitStatus('idle');
+      submitStatusResetTimerRef.current = null;
+    }, 3900);
+    return () => {
+      if (submitStatusReturnTimerRef.current !== null) {
+        window.clearTimeout(submitStatusReturnTimerRef.current);
+        submitStatusReturnTimerRef.current = null;
+      }
+      if (submitStatusResetTimerRef.current !== null) {
+        window.clearTimeout(submitStatusResetTimerRef.current);
+        submitStatusResetTimerRef.current = null;
+      }
+    };
+  }, [submitStatus]);
+
+  useEffect(() => {
+    setVisibleSolutionCount(0);
+    setVisibleMetaCount(0);
+    setShowLowConfidenceHint(false);
+
+    if (solutionLines.length === 0 && !solveMeta) {
+      return;
+    }
+
+    const timers: number[] = [];
+    const lineStartDelay = 80;
+    const lineStepDelay = 260;
+    const metaStepDelay = 190;
+
+    solutionLines.forEach((_, idx) => {
+      timers.push(
+        window.setTimeout(() => {
+          setVisibleSolutionCount(idx + 1);
+        }, lineStartDelay + idx * lineStepDelay),
+      );
+    });
+
+    const rowCount = solveMeta ? 4 : 0;
+    const metaStartDelay =
+      lineStartDelay +
+      Math.max(0, solutionLines.length - 1) * lineStepDelay +
+      (solutionLines.length > 0 ? 260 : 0);
+
+    for (let idx = 0; idx < rowCount; idx += 1) {
+      timers.push(
+        window.setTimeout(() => {
+          setVisibleMetaCount(idx + 1);
+        }, metaStartDelay + idx * metaStepDelay),
+      );
+    }
+
+    if (solveMeta && solveMeta.confidence !== null && solveMeta.confidence < 0.75) {
+      timers.push(
+        window.setTimeout(() => {
+          setShowLowConfidenceHint(true);
+        }, metaStartDelay + rowCount * metaStepDelay + 140),
+      );
+    }
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [solutionLines, solveMeta]);
+
+  useEffect(() => {
+    const scopeKey = settingsStorageScope ?? '__default__';
+    if (appliedThemeScopeRef.current === scopeKey) {
+      return;
+    }
+    appliedThemeScopeRef.current = scopeKey;
+
+    const storedThemeMode = readScopedStorageValue(
+      DASHBOARD_THEME_MODE_STORAGE_KEY,
+      settingsStorageScope,
+    );
+    if (storedThemeMode === 'light' || storedThemeMode === 'dark') {
+      setTheme(storedThemeMode);
+    }
+  }, [setTheme, settingsStorageScope]);
+
+  useEffect(() => {
+    if (theme === 'light' || theme === 'dark') {
+      writeScopedStorageValue(DASHBOARD_THEME_MODE_STORAGE_KEY, settingsStorageScope, theme);
+    }
+  }, [settingsStorageScope, theme]);
 
   const backendUrl = useMemo(() => {
     return process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://127.0.0.1:8010';
@@ -486,6 +315,7 @@ export default function SolveTestClient() {
     setSolutionLines([]);
     setSolveMeta(null);
     setError(null);
+    setSubmitStatus('idle');
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -493,9 +323,11 @@ export default function SolveTestClient() {
     setError(null);
     setSolutionLines([]);
     setSolveMeta(null);
+    setSubmitStatus('sending');
 
     if (!file) {
       setError('Please choose an image first.');
+      setSubmitStatus('idle');
       return;
     }
 
@@ -534,12 +366,14 @@ export default function SolveTestClient() {
         }
 
         setError(msg);
+        setSubmitStatus('idle');
       } else {
         const lines = extractSolutionLines(data);
         const normalizedLines = lines.length ? lines : ['(No solution returned)'];
         const meta = extractSolveMeta(data);
         setSolutionLines(normalizedLines);
         setSolveMeta(meta);
+        setSubmitStatus('done');
 
         if (isSuccessfulSolve(data)) {
           const solveTimeMs = Math.max(0, Math.round(performance.now() - solveStartedAt));
@@ -565,6 +399,7 @@ export default function SolveTestClient() {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Network error';
       setError(message);
+      setSubmitStatus('idle');
     } finally {
       setLoading(false);
     }
@@ -613,8 +448,9 @@ export default function SolveTestClient() {
         secondaryChannels,
         gradientEnabled,
         gradientDirection,
+        isDark,
       ),
-    [accentChannels, gradientDirection, gradientEnabled, secondaryChannels],
+    [accentChannels, gradientDirection, gradientEnabled, isDark, secondaryChannels],
   );
   const chessAppPanelGradient = useMemo(
     () =>
@@ -623,8 +459,9 @@ export default function SolveTestClient() {
         secondaryChannels,
         gradientEnabled,
         gradientDirection,
+        isDark,
       ),
-    [accentChannels, gradientDirection, gradientEnabled, secondaryChannels],
+    [accentChannels, gradientDirection, gradientEnabled, isDark, secondaryChannels],
   );
   const chessAppPanelStyle = chessAppPanelGradient
     ? ({
@@ -632,6 +469,10 @@ export default function SolveTestClient() {
       } as React.CSSProperties)
     : undefined;
   const themedButtonStyle = chessAppPanelStyle;
+
+  if (!isMounted) {
+    return <main className="min-h-screen flex items-center justify-center p-6" />;
+  }
 
   return (
     <main className="min-h-screen flex items-center justify-center p-6" style={{ background: pageBackground }}>
@@ -762,7 +603,7 @@ export default function SolveTestClient() {
             </div>
 
             <div className="mt-8 flex justify-center">
-              {loading ? (
+              {loading || submitStatus === 'sending' ? (
                 <div
                   className="neumo-surface-soft px-5 py-3 flex items-center gap-3"
                   style={chessAppPanelStyle}
@@ -780,14 +621,46 @@ export default function SolveTestClient() {
                   <span className="text-sm font-medium chess-loading-text">Sending</span>
                 </div>
               ) : (
-                <button
-                  type="submit"
-                  disabled={!file}
-                  className={`neumo-pill px-8 py-3 text-base font-medium disabled:opacity-60 disabled:active:translate-y-0 ${pressable}`}
-                  style={themedButtonStyle}
-                >
-                  Solve
-                </button>
+                <div className="relative h-[50px] min-w-[136px]">
+                  <div
+                    className={`absolute inset-0 transition-all duration-500 ${
+                      submitStatus === 'done'
+                        ? 'opacity-100 translate-y-0 scale-100'
+                        : 'opacity-0 -translate-y-1 scale-[0.98] pointer-events-none'
+                    }`}
+                  >
+                    <div
+                      className="neumo-surface-soft chess-status-done px-5 py-3 h-full flex items-center justify-center gap-3"
+                      style={chessAppPanelStyle}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <span className="text-sm font-semibold tracking-tight">Done</span>
+                      <CheckCircle2
+                        className="h-5 w-5 text-emerald-500 chess-done-check"
+                        strokeWidth={2.4}
+                        aria-hidden="true"
+                      />
+                      <span className="chess-status-done-sheen" aria-hidden="true" />
+                    </div>
+                  </div>
+                  <div
+                    className={`absolute inset-0 transition-all duration-500 ${
+                      submitStatus === 'returning' || submitStatus === 'idle'
+                        ? 'opacity-100 translate-y-0 scale-100'
+                        : 'opacity-0 translate-y-1 scale-[0.98] pointer-events-none'
+                    }`}
+                  >
+                    <button
+                      type="submit"
+                      disabled={!file}
+                      className={`neumo-pill w-full h-full px-8 py-3 text-base font-medium disabled:opacity-60 disabled:active:translate-y-0 ${pressable}`}
+                      style={themedButtonStyle}
+                    >
+                      Solve
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           </form>
@@ -805,8 +678,8 @@ export default function SolveTestClient() {
 
             {solutionLines.length > 0 ? (
               <ol className="space-y-3 text-2xl md:text-[28px] leading-snug">
-                {solutionLines.map((line, idx) => (
-                  <li key={`${idx}-${line}`} className="flex gap-4">
+                {solutionLines.slice(0, visibleSolutionCount).map((line, idx) => (
+                  <li key={`${idx}-${line}`} className="flex gap-4 chess-stream-item">
                     <span className="w-8 text-right opacity-70">{idx + 1}.</span>
                     <span className="font-medium">{line}</span>
                   </li>
@@ -820,32 +693,40 @@ export default function SolveTestClient() {
               <div className="mt-8 pt-6 border-t border-black/10 dark:border-white/15">
                 <h3 className="text-lg font-semibold tracking-tight">Position Check</h3>
                 <dl className="mt-4 space-y-3 text-sm md:text-base">
-                  <div className="flex items-start justify-between gap-4">
-                    <dt className="opacity-70">Side to move</dt>
-                    <dd className="font-medium">{solveMeta.sideToMove ?? 'Unavailable'}</dd>
-                  </div>
-                  <div className="flex items-start justify-between gap-4">
-                    <dt className="opacity-70">Vision confidence</dt>
-                    <dd className="font-medium">{formatConfidence(solveMeta.confidence)}</dd>
-                  </div>
-                  <div className="flex items-start justify-between gap-4">
-                    <dt className="opacity-70">Vision attempts</dt>
-                    <dd className="font-medium">{solveMeta.attemptsUsed ?? 'Unavailable'}</dd>
-                  </div>
-                  <div className="flex items-start justify-between gap-4">
-                    <dt className="opacity-70">Mate status</dt>
-                    <dd className="font-medium">
-                      {solveMeta.mateFound === null
-                        ? 'Unavailable'
-                        : solveMeta.mateFound
-                          ? `Mate in ${solveMeta.mateIn ?? '?'}`
-                          : 'No forced mate (1-3)'}
-                    </dd>
-                  </div>
+                  {visibleMetaCount >= 1 && (
+                    <div className="flex items-start justify-between gap-4 chess-stream-item">
+                      <dt className="opacity-70">Side to move</dt>
+                      <dd className="font-medium">{solveMeta.sideToMove ?? 'Unavailable'}</dd>
+                    </div>
+                  )}
+                  {visibleMetaCount >= 2 && (
+                    <div className="flex items-start justify-between gap-4 chess-stream-item">
+                      <dt className="opacity-70">Vision confidence</dt>
+                      <dd className="font-medium">{formatConfidence(solveMeta.confidence)}</dd>
+                    </div>
+                  )}
+                  {visibleMetaCount >= 3 && (
+                    <div className="flex items-start justify-between gap-4 chess-stream-item">
+                      <dt className="opacity-70">Vision attempts</dt>
+                      <dd className="font-medium">{solveMeta.attemptsUsed ?? 'Unavailable'}</dd>
+                    </div>
+                  )}
+                  {visibleMetaCount >= 4 && (
+                    <div className="flex items-start justify-between gap-4 chess-stream-item">
+                      <dt className="opacity-70">Mate status</dt>
+                      <dd className="font-medium">
+                        {solveMeta.mateFound === null
+                          ? 'Unavailable'
+                          : solveMeta.mateFound
+                            ? `Mate in ${solveMeta.mateIn ?? '?'}`
+                            : 'No forced mate (1-3)'}
+                      </dd>
+                    </div>
+                  )}
                 </dl>
 
-                {solveMeta.confidence !== null && solveMeta.confidence < 0.75 && (
-                  <p className="mt-4 text-xs opacity-70">
+                {showLowConfidenceHint && (
+                  <p className="mt-4 text-xs opacity-70 chess-stream-item">
                     Low vision confidence can cause wrong puzzle positions. Try a cleaner crop and
                     verify the side selector in the top-left.
                   </p>
