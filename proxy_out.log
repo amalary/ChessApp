@@ -1,3 +1,7 @@
-2026/04/21 13:57:17 Authorizing with the credentials file at "chessapp-477519-f3f4cd22fc7e.json"
-2026/04/21 13:57:17 [chessapp-477519:us-west2:chess-app-project] Listening on 127.0.0.1:5432
-2026/04/21 13:57:17 The proxy has started successfully and is ready for new connections!
+2026/04/24 13:45:49 Authorizing with the credentials file at "chessapp-477519-f3f4cd22fc7e.json"
+2026/04/24 13:45:49 [chessapp-477519:us-west2:chess-app-project] Listening on 127.0.0.1:5432
+2026/04/24 13:45:49 The proxy has started successfully and is ready for new connections!
+2026/04/24 13:49:57 [chessapp-477519:us-west2:chess-app-project] Accepted connection from 127.0.0.1:63174
+2026/04/24 14:47:33 Sending SIGTERM signal for proxy to shutdown.
+2026/04/24 14:47:33 SIGTERM signal received. Shutting down...
+2026/04/24 14:47:33 proxy server error: accept tcp 127.0.0.1:5432: use of closed network connection

@@ -1,5 +1,6 @@
-INFO:     Loading environment from '../.env'
-INFO:     Started server process [28080]
+INFO:     Started server process [3612]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:8010 (Press CTRL+C to quit)
+ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8010): [winerror 10048] only one usage of each socket address (protocol/network address/port) is normally permitted
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.

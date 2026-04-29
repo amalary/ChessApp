@@ -1,0 +1,1 @@
+2026/04/24 14:17:15 [chessapp-477519:us-west2:chess-app-project] connection aborted - error reading from instance: read tcp 172.24.36.36:63175->34.94.189.133:3307: wsarecv: An established connection was aborted by the software in your host machine.
