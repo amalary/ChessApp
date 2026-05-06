@@ -6,16 +6,34 @@ export type SubmissionPositionCheck = {
   mateIn: number | null;
 };
 
+export type FirstMoveAssessmentStatus = 'correct' | 'incorrect' | 'almost_correct';
+
+export type FirstMoveAssessmentRecord = {
+  firstMove: string;
+  bestMove: string | null;
+  isFirstMoveCorrect: boolean;
+  status: FirstMoveAssessmentStatus;
+  timeToFirstMoveSeconds: number;
+  puzzleId: string;
+  userId: string | null;
+  attemptId: string;
+  createdAt: string;
+  isValidForFirstMoveAccuracy: boolean;
+  invalidReason: string | null;
+};
+
 export type PuzzleSubmissionRecord = {
   id: string;
   fileName: string;
   submittedAt: string;
   expectedSideToMove: 'white' | 'black';
+  fen?: string | null;
   solveTimeMs?: number | null;
   puzzleElo?: number | null;
   originalPuzzleImageDataUrl?: string | null;
   positionCheck: SubmissionPositionCheck;
   solutionLines: string[];
+  firstMoveAssessment?: FirstMoveAssessmentRecord | null;
 };
 
 type NewPuzzleSubmissionRecord = Omit<PuzzleSubmissionRecord, 'id' | 'submittedAt'>;
@@ -64,6 +82,7 @@ function isSubmissionRecord(value: unknown): value is PuzzleSubmissionRecord {
     typeof candidate.fileName === 'string' &&
     typeof candidate.submittedAt === 'string' &&
     (candidate.expectedSideToMove === 'white' || candidate.expectedSideToMove === 'black') &&
+    (candidate.fen === undefined || candidate.fen === null || typeof candidate.fen === 'string') &&
     (candidate.solveTimeMs === undefined ||
       candidate.solveTimeMs === null ||
       (typeof candidate.solveTimeMs === 'number' &&
@@ -78,9 +97,40 @@ function isSubmissionRecord(value: unknown): value is PuzzleSubmissionRecord {
     (candidate.originalPuzzleImageDataUrl === undefined ||
       candidate.originalPuzzleImageDataUrl === null ||
       typeof candidate.originalPuzzleImageDataUrl === 'string') &&
+    (candidate.firstMoveAssessment === undefined ||
+      candidate.firstMoveAssessment === null ||
+      isFirstMoveAssessmentRecord(candidate.firstMoveAssessment)) &&
     Array.isArray(candidate.solutionLines) &&
     candidate.solutionLines.every((line) => typeof line === 'string') &&
     isPositionCheck(candidate.positionCheck)
+  );
+}
+
+function isFirstMoveAssessmentRecord(value: unknown): value is FirstMoveAssessmentRecord {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const statusValid =
+    candidate.status === 'correct' ||
+    candidate.status === 'incorrect' ||
+    candidate.status === 'almost_correct';
+
+  return (
+    typeof candidate.firstMove === 'string' &&
+    (candidate.bestMove === null || typeof candidate.bestMove === 'string') &&
+    typeof candidate.isFirstMoveCorrect === 'boolean' &&
+    statusValid &&
+    typeof candidate.timeToFirstMoveSeconds === 'number' &&
+    Number.isFinite(candidate.timeToFirstMoveSeconds) &&
+    candidate.timeToFirstMoveSeconds >= 0 &&
+    typeof candidate.puzzleId === 'string' &&
+    (candidate.userId === null || typeof candidate.userId === 'string') &&
+    typeof candidate.attemptId === 'string' &&
+    typeof candidate.createdAt === 'string' &&
+    typeof candidate.isValidForFirstMoveAccuracy === 'boolean' &&
+    (candidate.invalidReason === null || typeof candidate.invalidReason === 'string')
   );
 }
 

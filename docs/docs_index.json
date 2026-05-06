@@ -1,0 +1,50 @@
+[
+  {
+    "title": "Getting Started",
+    "slug": "getting-started",
+    "path": "/docs/getting-started.md",
+    "category": "onboarding"
+  },
+  {
+    "title": "Uploading Puzzles",
+    "slug": "uploading-puzzles",
+    "path": "/docs/uploading-puzzles.md",
+    "category": "core-feature"
+  },
+  {
+    "title": "Solving Puzzles",
+    "slug": "solving-puzzles",
+    "path": "/docs/solving-puzzles.md",
+    "category": "core-feature"
+  },
+  {
+    "title": "Analytics",
+    "slug": "analytics",
+    "path": "/docs/analytics.md",
+    "category": "dashboard"
+  },
+  {
+    "title": "Settings",
+    "slug": "settings",
+    "path": "/docs/settings.md",
+    "category": "dashboard"
+  },
+  {
+    "title": "Assistant",
+    "slug": "assistant",
+    "path": "/docs/assistant.md",
+    "category": "assistant"
+  },
+  {
+    "title": "Troubleshooting",
+    "slug": "troubleshooting",
+    "path": "/docs/troubleshooting.md",
+    "category": "support"
+  },
+  {
+    "title": "FAQ",
+    "slug": "faq",
+    "path": "/docs/faq.md",
+    "category": "support"
+  }
+]

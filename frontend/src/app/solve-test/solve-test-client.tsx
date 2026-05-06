@@ -9,6 +9,7 @@ import { CheckCircle2, Crown, LayoutDashboard } from 'lucide-react';
 import {
   addPuzzleSubmission,
   estimatePuzzleElo,
+  FirstMoveAssessmentStatus,
   getPuzzleSubmissionUpdateEventName,
   getUnseenPuzzleSubmissionCount,
 } from '@/lib/puzzle-submissions';
@@ -39,6 +40,25 @@ const DASHBOARD_GRADIENT_ENABLED_STORAGE_KEY = 'chessapp.dashboard.gradient.enab
 const DASHBOARD_GRADIENT_DIRECTION_STORAGE_KEY = 'chessapp.dashboard.gradient.direction';
 const DASHBOARD_THEME_MODE_STORAGE_KEY = 'chessapp.dashboard.theme.mode';
 const DASHBOARD_THEME_UPDATED_EVENT = 'chessapp.dashboard.theme.updated';
+const FIRST_MOVE_MIN_CONFIDENCE = 0.75;
+const BOARD_FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const;
+const BOARD_RANKS = ['8', '7', '6', '5', '4', '3', '2', '1'] as const;
+
+type FirstMoveAttempt = {
+  sourceSquare: string;
+  destinationSquare: string;
+  moveUci: string;
+  timeToFirstMoveSeconds: number;
+  createdAt: string;
+};
+
+type FirstMoveSolveOutcome = {
+  status: FirstMoveAssessmentStatus;
+  isFirstMoveCorrect: boolean;
+  bestMove: string | null;
+  isValidForFirstMoveAccuracy: boolean;
+  invalidReason: string | null;
+};
 
 function loadImageFromObjectUrl(objectUrl: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -85,6 +105,112 @@ async function createSubmissionImageDataUrl(file: File): Promise<string | null> 
   }
 }
 
+function createAttemptId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `attempt-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+}
+
+function squareFromBoardIndex(row: number, col: number): string {
+  return `${BOARD_FILES[col]}${BOARD_RANKS[row]}`;
+}
+
+function normalizeUciMove(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim().toLowerCase();
+  if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
+function extractFirstUciMove(data: SolveResponse): string | null {
+  if (!Array.isArray(data.moves_uci)) {
+    return null;
+  }
+  for (const candidate of data.moves_uci) {
+    const normalized = normalizeUciMove(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
+function isValidFenString(value: unknown): boolean {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const fen = value.trim();
+  if (!fen) {
+    return false;
+  }
+  const fields = fen.split(/\s+/);
+  if (fields.length < 4) {
+    return false;
+  }
+  const board = fields[0];
+  const ranks = board.split('/');
+  if (ranks.length !== 8) {
+    return false;
+  }
+  const squaresPerRankValid = ranks.every((rank) => {
+    let count = 0;
+    for (const symbol of rank) {
+      if (/[1-8]/.test(symbol)) {
+        count += Number(symbol);
+      } else if (/[prnbqkPRNBQK]/.test(symbol)) {
+        count += 1;
+      } else {
+        return false;
+      }
+    }
+    return count === 8;
+  });
+  if (!squaresPerRankValid) {
+    return false;
+  }
+  if (fields[1] !== 'w' && fields[1] !== 'b') {
+    return false;
+  }
+  return true;
+}
+
+function createPuzzleId(fen: unknown, file: File): string {
+  if (typeof fen === 'string' && fen.trim()) {
+    return `fen:${fen.trim()}`;
+  }
+  return `upload:${file.name}:${file.size}:${file.lastModified}`;
+}
+
+function classifyFirstMove(
+  attemptedMove: string,
+  bestMove: string | null,
+): { status: FirstMoveAssessmentStatus; isFirstMoveCorrect: boolean } {
+  const normalizedAttempt = normalizeUciMove(attemptedMove);
+  const normalizedBest = normalizeUciMove(bestMove);
+  if (!normalizedAttempt || !normalizedBest) {
+    return { status: 'incorrect', isFirstMoveCorrect: false };
+  }
+
+  const attemptCore = normalizedAttempt.slice(0, 4);
+  const bestCore = normalizedBest.slice(0, 4);
+  if (attemptCore === bestCore) {
+    return { status: 'correct', isFirstMoveCorrect: true };
+  }
+
+  const sameSource = attemptCore.slice(0, 2) === bestCore.slice(0, 2);
+  const sameDestination = attemptCore.slice(2, 4) === bestCore.slice(2, 4);
+  if (sameSource || sameDestination) {
+    return { status: 'almost_correct', isFirstMoveCorrect: false };
+  }
+
+  return { status: 'incorrect', isFirstMoveCorrect: false };
+}
+
 export default function SolveTestClient() {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { user } = useUser();
@@ -108,6 +234,11 @@ export default function SolveTestClient() {
   const [visibleSolutionCount, setVisibleSolutionCount] = useState(0);
   const [visibleMetaCount, setVisibleMetaCount] = useState(0);
   const [showLowConfidenceHint, setShowLowConfidenceHint] = useState(false);
+  const [attemptId, setAttemptId] = useState<string>(() => createAttemptId());
+  const [attemptStartedAtMs, setAttemptStartedAtMs] = useState<number | null>(null);
+  const [selectedSourceSquare, setSelectedSourceSquare] = useState<string | null>(null);
+  const [firstMoveAttempt, setFirstMoveAttempt] = useState<FirstMoveAttempt | null>(null);
+  const [firstMoveSolveOutcome, setFirstMoveSolveOutcome] = useState<FirstMoveSolveOutcome | null>(null);
 
   const [queenIsWhite, setQueenIsWhite] = useState(true);
   const [isTransitioningToDashboard, setIsTransitioningToDashboard] = useState(false);
@@ -316,6 +447,52 @@ export default function SolveTestClient() {
     setSolveMeta(null);
     setError(null);
     setSubmitStatus('idle');
+    setSelectedSourceSquare(null);
+    setFirstMoveAttempt(null);
+    setFirstMoveSolveOutcome(null);
+    setAttemptId(createAttemptId());
+    setAttemptStartedAtMs(chosen ? performance.now() : null);
+  };
+
+  const handleSquareClick = (square: string) => {
+    if (!file || loading) {
+      return;
+    }
+
+    if (firstMoveAttempt) {
+      const isSelectedFirstMoveSquare =
+        square === firstMoveAttempt.sourceSquare || square === firstMoveAttempt.destinationSquare;
+      if (isSelectedFirstMoveSquare) {
+        setFirstMoveAttempt(null);
+        setFirstMoveSolveOutcome(null);
+        setSelectedSourceSquare(null);
+      }
+      return;
+    }
+
+    if (!selectedSourceSquare) {
+      setSelectedSourceSquare(square);
+      setError(null);
+      return;
+    }
+
+    if (selectedSourceSquare === square) {
+      setSelectedSourceSquare(null);
+      return;
+    }
+
+    const elapsedMs =
+      attemptStartedAtMs !== null ? Math.max(0, performance.now() - attemptStartedAtMs) : 0;
+    const timeToFirstMoveSeconds = Math.round((elapsedMs / 1000) * 100) / 100;
+    setFirstMoveAttempt({
+      sourceSquare: selectedSourceSquare,
+      destinationSquare: square,
+      moveUci: `${selectedSourceSquare}${square}`.toLowerCase(),
+      timeToFirstMoveSeconds,
+      createdAt: new Date().toISOString(),
+    });
+    setSelectedSourceSquare(null);
+    setError(null);
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -324,9 +501,16 @@ export default function SolveTestClient() {
     setSolutionLines([]);
     setSolveMeta(null);
     setSubmitStatus('sending');
+    setFirstMoveSolveOutcome(null);
 
     if (!file) {
       setError('Please choose an image first.');
+      setSubmitStatus('idle');
+      return;
+    }
+
+    if (!firstMoveAttempt) {
+      setError('Select your first move on the puzzle board before pressing Solve.');
       setSubmitStatus('idle');
       return;
     }
@@ -378,6 +562,31 @@ export default function SolveTestClient() {
         if (isSuccessfulSolve(data)) {
           const solveTimeMs = Math.max(0, Math.round(performance.now() - solveStartedAt));
           const originalPuzzleImageDataUrl = await createSubmissionImageDataUrl(file);
+          const bestMove = extractFirstUciMove(data);
+          const firstMoveClassification = classifyFirstMove(firstMoveAttempt.moveUci, bestMove);
+          const hasLowConfidence =
+            meta.confidence === null || meta.confidence < FIRST_MOVE_MIN_CONFIDENCE;
+          const hasInvalidFen = !isValidFenString(data.fen);
+          const normalizedFen =
+            typeof data.fen === 'string' && isValidFenString(data.fen) ? data.fen.trim() : null;
+          const hasNoConfirmedMate =
+            meta.mateFound !== true || meta.mateIn === null || bestMove === null;
+          let invalidReason: string | null = null;
+          if (hasLowConfidence) {
+            invalidReason = 'low_vision_confidence';
+          } else if (hasInvalidFen) {
+            invalidReason = 'invalid_fen';
+          } else if (hasNoConfirmedMate) {
+            invalidReason = 'stockfish_no_mate';
+          }
+          const isValidForFirstMoveAccuracy = invalidReason === null;
+          setFirstMoveSolveOutcome({
+            status: firstMoveClassification.status,
+            isFirstMoveCorrect: firstMoveClassification.isFirstMoveCorrect,
+            bestMove,
+            isValidForFirstMoveAccuracy,
+            invalidReason,
+          });
           const puzzleElo = estimatePuzzleElo({
             solveTimeMs,
             mateIn: meta.mateIn,
@@ -388,11 +597,25 @@ export default function SolveTestClient() {
           addPuzzleSubmission({
             fileName: file.name,
             expectedSideToMove: queenIsWhite ? 'white' : 'black',
+            fen: normalizedFen,
             solveTimeMs,
             puzzleElo,
             originalPuzzleImageDataUrl,
             positionCheck: meta,
             solutionLines: normalizedLines,
+            firstMoveAssessment: {
+              firstMove: firstMoveAttempt.moveUci,
+              bestMove,
+              isFirstMoveCorrect: firstMoveClassification.isFirstMoveCorrect,
+              status: firstMoveClassification.status,
+              timeToFirstMoveSeconds: firstMoveAttempt.timeToFirstMoveSeconds,
+              puzzleId: createPuzzleId(data.fen, file),
+              userId: user?.sub ?? null,
+              attemptId,
+              createdAt: firstMoveAttempt.createdAt,
+              isValidForFirstMoveAccuracy,
+              invalidReason,
+            },
           });
         }
       }
@@ -430,6 +653,8 @@ export default function SolveTestClient() {
 
   const queenStroke = isDark ? '#e2e8f0' : '#111827';
   const controlsLocked = loading || isTransitioningToDashboard;
+  const hasSolveResponse = solutionLines.length > 0 || solveMeta !== null;
+  const canClickPuzzleToReplace = !!previewUrl && hasSolveResponse && !controlsLocked;
   const accentChannels = useMemo<[number, number, number]>(
     () => hexToRgbChannels(accentColor) ?? hexToRgbChannels(DEFAULT_DASHBOARD_ACCENT) ?? [122, 148, 191],
     [accentColor],
@@ -561,34 +786,93 @@ export default function SolveTestClient() {
             )}
 
             <div className={`${file ? 'mt-6' : 'mt-10'} flex justify-center`}>
-              <label
-                htmlFor={controlsLocked ? undefined : fileInputId}
-                onClick={controlsLocked ? (e) => e.preventDefault() : undefined}
-                className={`group ${controlsLocked ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-                aria-label="Upload or replace puzzle image"
-                aria-disabled={controlsLocked}
-              >
-                <div className="neumo-ring w-[260px] h-[260px] p-4 flex items-center justify-center">
-                  <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center relative">
-                    {previewUrl ? (
-                      <>
-                        <Image
-                          src={previewUrl}
-                          alt="Puzzle preview"
-                          fill
-                          unoptimized
-                          sizes="260px"
-                          className="w-full h-full object-cover"
-                        />
-                        <div
-                          className={`absolute inset-0 flex items-center justify-center bg-black/35 opacity-0 transition-opacity duration-150 ${controlsLocked ? '' : 'group-hover:opacity-100'}`}
-                        >
-                          <span className="text-white text-sm font-medium px-4 text-center">
-                            Click to re-upload
+              {previewUrl ? (
+                <div className="space-y-3">
+                  <div className="neumo-ring w-[260px] h-[260px] rounded-[28px] p-4 flex items-center justify-center">
+                    <div
+                      className={`w-full h-full rounded-[20px] overflow-hidden flex items-center justify-center relative ${
+                        canClickPuzzleToReplace ? 'cursor-pointer group' : ''
+                      }`}
+                      role={canClickPuzzleToReplace ? 'button' : undefined}
+                      tabIndex={canClickPuzzleToReplace ? 0 : undefined}
+                      onClick={
+                        canClickPuzzleToReplace
+                          ? () => {
+                              const input = document.getElementById(fileInputId) as HTMLInputElement | null;
+                              input?.click();
+                            }
+                          : undefined
+                      }
+                      onKeyDown={
+                        canClickPuzzleToReplace
+                          ? (event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                const input = document.getElementById(fileInputId) as HTMLInputElement | null;
+                                input?.click();
+                              }
+                            }
+                          : undefined
+                      }
+                      aria-label={
+                        canClickPuzzleToReplace ? 'Click puzzle image to replace or re-upload' : undefined
+                      }
+                    >
+                      <Image
+                        src={previewUrl}
+                        alt="Puzzle preview"
+                        fill
+                        unoptimized
+                        sizes="260px"
+                        className="w-full h-full object-cover"
+                      />
+                      {canClickPuzzleToReplace ? (
+                        <div className="absolute inset-0 bg-black/0 hover:bg-black/25 transition-colors duration-150 flex items-center justify-center">
+                          <span className="text-white text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                            Click to replace image
                           </span>
                         </div>
-                      </>
-                    ) : (
+                      ) : (
+                        <div className="absolute inset-0 grid grid-cols-8 grid-rows-8">
+                          {Array.from({ length: 64 }, (_, idx) => {
+                            const row = Math.floor(idx / 8);
+                            const col = idx % 8;
+                            const square = squareFromBoardIndex(row, col);
+                            const isSelectedSource = selectedSourceSquare === square;
+                            const isSelectedDestination = firstMoveAttempt?.destinationSquare === square;
+                            const isCommittedSource = firstMoveAttempt?.sourceSquare === square;
+                            return (
+                              <button
+                                key={square}
+                                type="button"
+                                onClick={() => handleSquareClick(square)}
+                                disabled={controlsLocked}
+                                className={`border border-black/15 dark:border-white/10 transition-colors ${
+                                  isSelectedSource
+                                    ? 'bg-sky-500/35'
+                                    : isCommittedSource || isSelectedDestination
+                                      ? 'bg-emerald-500/35'
+                                      : 'bg-transparent hover:bg-white/12'
+                                }`}
+                                aria-label={`Select square ${square}`}
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <label
+                  htmlFor={controlsLocked ? undefined : fileInputId}
+                  onClick={controlsLocked ? (e) => e.preventDefault() : undefined}
+                  className={`group ${controlsLocked ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+                  aria-label="Upload or replace puzzle image"
+                  aria-disabled={controlsLocked}
+                >
+                  <div className="neumo-ring w-[260px] h-[260px] rounded-[28px] p-4 flex items-center justify-center">
+                    <div className="w-full h-full rounded-[20px] overflow-hidden flex items-center justify-center relative">
                       <div
                         className={`w-full h-full neumo-inset flex items-center justify-center transition-all duration-150 ${controlsLocked ? '' : 'group-hover:brightness-[1.03] group-hover:scale-[1.01]'}`}
                       >
@@ -596,10 +880,10 @@ export default function SolveTestClient() {
                           Upload a puzzle image
                         </span>
                       </div>
-                    )}
+                    </div>
                   </div>
-                </div>
-              </label>
+                </label>
+              )}
             </div>
 
             <div className="mt-8 flex justify-center">
@@ -621,7 +905,7 @@ export default function SolveTestClient() {
                   <span className="text-sm font-medium chess-loading-text">Sending</span>
                 </div>
               ) : (
-                <div className="relative h-[50px] min-w-[136px]">
+                <div className="relative h-[50px] min-w-[172px]">
                   <div
                     className={`absolute inset-0 transition-all duration-500 ${
                       submitStatus === 'done'
@@ -651,14 +935,28 @@ export default function SolveTestClient() {
                         : 'opacity-0 translate-y-1 scale-[0.98] pointer-events-none'
                     }`}
                   >
-                    <button
-                      type="submit"
-                      disabled={!file}
-                      className={`neumo-pill w-full h-full px-8 py-3 text-base font-medium disabled:opacity-60 disabled:active:translate-y-0 ${pressable}`}
-                      style={themedButtonStyle}
-                    >
-                      Solve
-                    </button>
+                    {file && !firstMoveAttempt ? (
+                      <label
+                        htmlFor={controlsLocked ? undefined : fileInputId}
+                        onClick={controlsLocked ? (e) => e.preventDefault() : undefined}
+                        className={`neumo-pill w-full h-full px-8 py-3 text-base font-medium whitespace-nowrap flex items-center justify-center ${pressable} ${
+                          controlsLocked ? 'cursor-not-allowed opacity-60 pointer-events-none' : 'cursor-pointer'
+                        }`}
+                        style={themedButtonStyle}
+                        aria-disabled={controlsLocked}
+                      >
+                        Replace Image
+                      </label>
+                    ) : (
+                      <button
+                        type="submit"
+                        disabled={!file || !firstMoveAttempt}
+                        className={`neumo-pill w-full h-full px-8 py-3 text-base font-medium disabled:opacity-60 disabled:active:translate-y-0 ${pressable}`}
+                        style={themedButtonStyle}
+                      >
+                        Solve
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -730,6 +1028,31 @@ export default function SolveTestClient() {
                     Low vision confidence can cause wrong puzzle positions. Try a cleaner crop and
                     verify the side selector in the top-left.
                   </p>
+                )}
+
+                {firstMoveSolveOutcome && (
+                  <div className="mt-4 rounded-xl bg-white/35 dark:bg-white/5 px-3 py-3 text-xs md:text-sm">
+                    <p className="font-semibold">First move evaluation</p>
+                    <p className="mt-1">
+                      Status:{' '}
+                      <span className="font-medium">
+                        {firstMoveSolveOutcome.status === 'almost_correct'
+                          ? 'Almost correct'
+                          : firstMoveSolveOutcome.status}
+                      </span>
+                    </p>
+                    <p className="mt-1">
+                      Best move:{' '}
+                      <span className="font-medium">
+                        {firstMoveSolveOutcome.bestMove ?? 'Unavailable'}
+                      </span>
+                    </p>
+                    {!firstMoveSolveOutcome.isValidForFirstMoveAccuracy && (
+                      <p className="mt-1 opacity-70">
+                        Excluded from First-Move Accuracy: {firstMoveSolveOutcome.invalidReason}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             )}

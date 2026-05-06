@@ -1,6 +1,8 @@
 export type SolveResponse = {
+  fen?: unknown;
   solution_line?: unknown;
   moves_san?: unknown;
+  moves_uci?: unknown;
   mate_found?: unknown;
   mate_in?: unknown;
   vision_confidence?: unknown;

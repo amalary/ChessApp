@@ -3,11 +3,12 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useUser } from '@auth0/nextjs-auth0/client';
 import { useTheme } from 'next-themes';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Activity,
   ArrowLeft,
   BarChart3,
+  Bot,
   ChevronDown,
   ChevronUp,
   Download,
@@ -15,6 +16,7 @@ import {
   Puzzle,
   Settings,
 } from 'lucide-react';
+import { AgentPage } from './agent-panel';
 import {
   getPuzzleSubmissionUpdateEventName,
   estimatePuzzleElo,
@@ -38,6 +40,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Analytics', icon: BarChart3 },
   { label: 'Puzzle Lab', icon: Puzzle },
   { label: 'Training', icon: Activity },
+  { label: 'Agent', icon: Bot },
   { label: 'Settings', icon: Settings },
 ];
 
@@ -52,7 +55,7 @@ const ANALYTICS_BASELINE_ACCURACY: Record<(typeof ANALYTICS_THEMES)[number], num
 };
 const ANALYTICS_SECONDARY_SUBSECTIONS = [
   'Solve Time vs Difficulty',
-  'Rating Progression',
+  'Puzzle Rating Progression',
   'Accuracy by Difficulty',
   'First-Move Accuracy',
 ] as const;
@@ -104,6 +107,19 @@ type EloTrendData = {
   subtitle: string;
 };
 
+type AccuracyTrendData = {
+  values: number[];
+  axisLabels: string[];
+  subtitle: string;
+};
+
+type PuzzleRatingProgressionData = {
+  eloValues: number[];
+  accuracyValues: number[];
+  axisLabels: string[];
+  subtitle: string;
+};
+
 type GradientDirection = (typeof GRADIENT_DIRECTIONS)[number]['value'];
 type AnalyticsTheme = (typeof ANALYTICS_THEMES)[number];
 type ThemeSettings = {
@@ -136,6 +152,17 @@ type SolveTimeDifficultyBucket = {
 type SolveTimeDifficultyData = {
   buckets: SolveTimeDifficultyBucket[];
   totalSolvedCount: number;
+};
+
+type FirstMoveAccuracySummary = {
+  validAttemptCount: number;
+  correctCount: number;
+  accuracyPercent: number | null;
+  averageTimeToFirstMoveSeconds: number | null;
+  commonWrongFirstMoves: Array<{
+    move: string;
+    count: number;
+  }>;
 };
 
 function normalizeHexColor(value: string | null | undefined): string | null {
@@ -349,6 +376,38 @@ function buildChartPaths(values: number[], width: number, height: number) {
 
   const areaPath = `${curve} L ${width} ${height} L 0 ${height} Z`;
   return { areaPath, linePath: curve };
+}
+
+function buildLinePathWithMax(values: number[], width: number, height: number, maxValue: number): string {
+  if (values.length < 2) {
+    return '';
+  }
+
+  const clampedMaxValue = Math.max(maxValue, 1);
+  const sanitizedValues = values.map((value) =>
+    typeof value === 'number' && Number.isFinite(value)
+      ? clamp(value, 0, clampedMaxValue)
+      : 0,
+  );
+  const step = width / (values.length - 1);
+  const padTop = 18;
+  const usableHeight = height - padTop - 16;
+  const points = sanitizedValues.map((value, idx) => {
+    const x = idx * step;
+    const normalizedValue = value / clampedMaxValue;
+    const y = height - 12 - normalizedValue * usableHeight;
+    return { x, y };
+  });
+
+  let curve = `M ${points[0].x} ${points[0].y}`;
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = points[i - 1];
+    const current = points[i];
+    const midX = (prev.x + current.x) / 2;
+    curve += ` Q ${midX} ${prev.y} ${current.x} ${current.y}`;
+  }
+
+  return curve;
 }
 
 function buildYAxisTicks(values: number[]): number[] {
@@ -803,6 +862,197 @@ function buildEloTrendData(
   };
 }
 
+function buildAccuracyTrendData(
+  activeRange: ActivityRange,
+  submissions: PuzzleSubmissionRecord[],
+): AccuracyTrendData {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const hourFormatter = new Intl.DateTimeFormat(undefined, { hour: 'numeric' });
+  const weekdayFormatter = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
+  const monthDayFormatter = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+  const monthFormatter = new Intl.DateTimeFormat(undefined, { month: 'short' });
+
+  const accuracyEntries = submissions.map((submission) => ({
+    submittedAt: new Date(submission.submittedAt),
+    accuracyPercent: calculateSubmissionAccuracyPercent(submission),
+  }));
+  const globalAverageAccuracy =
+    accuracyEntries.length > 0
+      ? Math.round(
+          accuracyEntries.reduce((sum, entry) => sum + entry.accuracyPercent, 0) /
+            accuracyEntries.length,
+        )
+      : 75;
+
+  if (activeRange === 'Today') {
+    const values = Array.from({ length: 12 }, () => [] as number[]);
+    const labels = Array.from({ length: 12 }, (_, idx) =>
+      hourFormatter.format(new Date(todayStart.getTime() + idx * TWO_HOURS_MS)),
+    );
+
+    accuracyEntries.forEach((entry) => {
+      if (Number.isNaN(entry.submittedAt.getTime())) {
+        return;
+      }
+      if (
+        entry.submittedAt.getFullYear() !== todayStart.getFullYear() ||
+        entry.submittedAt.getMonth() !== todayStart.getMonth() ||
+        entry.submittedAt.getDate() !== todayStart.getDate()
+      ) {
+        return;
+      }
+
+      const offset = entry.submittedAt.getTime() - todayStart.getTime();
+      const bucketIndex = Math.min(values.length - 1, Math.max(0, Math.floor(offset / TWO_HOURS_MS)));
+      values[bucketIndex].push(entry.accuracyPercent);
+    });
+
+    labels[labels.length - 1] = 'Now';
+    const averaged = fillMissingWithNearest(
+      values.map((bucket) =>
+        bucket.length > 0
+          ? bucket.reduce((sum, accuracyPercent) => sum + accuracyPercent, 0) / bucket.length
+          : null,
+      ),
+      globalAverageAccuracy,
+    );
+    return {
+      values: averaged,
+      axisLabels: buildEvenlySpacedLabels(labels, 6),
+      subtitle: 'Estimated solve accuracy trend across today',
+    };
+  }
+
+  if (activeRange === 'Week') {
+    const start = new Date(todayStart.getTime() - 6 * DAY_MS);
+    const values = Array.from({ length: 7 }, () => [] as number[]);
+    const labels = Array.from({ length: 7 }, (_, idx) =>
+      weekdayFormatter.format(new Date(start.getTime() + idx * DAY_MS)),
+    );
+
+    accuracyEntries.forEach((entry) => {
+      if (Number.isNaN(entry.submittedAt.getTime())) {
+        return;
+      }
+
+      const submittedDay = new Date(
+        entry.submittedAt.getFullYear(),
+        entry.submittedAt.getMonth(),
+        entry.submittedAt.getDate(),
+      );
+      const dayIndex = Math.floor((submittedDay.getTime() - start.getTime()) / DAY_MS);
+      if (dayIndex >= 0 && dayIndex < values.length) {
+        values[dayIndex].push(entry.accuracyPercent);
+      }
+    });
+
+    labels[labels.length - 1] = 'Today';
+    const averaged = fillMissingWithNearest(
+      values.map((bucket) =>
+        bucket.length > 0
+          ? bucket.reduce((sum, accuracyPercent) => sum + accuracyPercent, 0) / bucket.length
+          : null,
+      ),
+      globalAverageAccuracy,
+    );
+    return {
+      values: averaged,
+      axisLabels: labels,
+      subtitle: 'Daily average solve accuracy over the last 7 days',
+    };
+  }
+
+  if (activeRange === 'Month') {
+    const start = new Date(todayStart.getTime() - 29 * DAY_MS);
+    const values = Array.from({ length: 30 }, () => [] as number[]);
+    const labels = Array.from({ length: 30 }, (_, idx) =>
+      monthDayFormatter.format(new Date(start.getTime() + idx * DAY_MS)),
+    );
+
+    accuracyEntries.forEach((entry) => {
+      if (Number.isNaN(entry.submittedAt.getTime())) {
+        return;
+      }
+
+      const submittedDay = new Date(
+        entry.submittedAt.getFullYear(),
+        entry.submittedAt.getMonth(),
+        entry.submittedAt.getDate(),
+      );
+      const dayIndex = Math.floor((submittedDay.getTime() - start.getTime()) / DAY_MS);
+      if (dayIndex >= 0 && dayIndex < values.length) {
+        values[dayIndex].push(entry.accuracyPercent);
+      }
+    });
+
+    labels[labels.length - 1] = 'Today';
+    const averaged = fillMissingWithNearest(
+      values.map((bucket) =>
+        bucket.length > 0
+          ? bucket.reduce((sum, accuracyPercent) => sum + accuracyPercent, 0) / bucket.length
+          : null,
+      ),
+      globalAverageAccuracy,
+    );
+    return {
+      values: averaged,
+      axisLabels: buildEvenlySpacedLabels(labels, 6),
+      subtitle: 'Daily average solve accuracy over the last 30 days',
+    };
+  }
+
+  const yearStart = new Date(todayStart.getFullYear(), todayStart.getMonth() - 11, 1);
+  const values = Array.from({ length: 12 }, () => [] as number[]);
+  const labels = Array.from({ length: 12 }, (_, idx) =>
+    monthFormatter.format(new Date(yearStart.getFullYear(), yearStart.getMonth() + idx, 1)),
+  );
+
+  accuracyEntries.forEach((entry) => {
+    if (Number.isNaN(entry.submittedAt.getTime())) {
+      return;
+    }
+    const monthIndex =
+      (entry.submittedAt.getFullYear() - yearStart.getFullYear()) * 12 +
+      (entry.submittedAt.getMonth() - yearStart.getMonth());
+    if (monthIndex >= 0 && monthIndex < values.length) {
+      values[monthIndex].push(entry.accuracyPercent);
+    }
+  });
+
+  labels[labels.length - 1] = 'This month';
+  const averaged = fillMissingWithNearest(
+    values.map((bucket) =>
+      bucket.length > 0
+        ? bucket.reduce((sum, accuracyPercent) => sum + accuracyPercent, 0) / bucket.length
+        : null,
+    ),
+    globalAverageAccuracy,
+  );
+  return {
+    values: averaged,
+    axisLabels: buildEvenlySpacedLabels(labels, 6),
+    subtitle: 'Monthly average solve accuracy over the last 12 months',
+  };
+}
+
+function buildPuzzleRatingProgressionData(
+  activeRange: ActivityRange,
+  submissions: PuzzleSubmissionRecord[],
+): PuzzleRatingProgressionData {
+  const eloTrendData = buildEloTrendData(activeRange, submissions);
+  const accuracyTrendData = buildAccuracyTrendData(activeRange, submissions);
+  const valueCount = Math.min(eloTrendData.values.length, accuracyTrendData.values.length);
+  const axisCount = Math.min(eloTrendData.axisLabels.length, valueCount);
+
+  return {
+    eloValues: eloTrendData.values.slice(0, valueCount),
+    accuracyValues: accuracyTrendData.values.slice(0, valueCount),
+    axisLabels: eloTrendData.axisLabels.slice(0, axisCount),
+    subtitle: 'Am I improving over time?',
+  };
+}
+
 function resolveSubmissionElo(submission: PuzzleSubmissionRecord): number {
   if (typeof submission.puzzleElo === 'number' && Number.isFinite(submission.puzzleElo)) {
     return submission.puzzleElo;
@@ -1065,6 +1315,54 @@ function buildSolveTimeDifficultyData(
   };
 }
 
+function buildFirstMoveAccuracySummary(
+  submissions: PuzzleSubmissionRecord[],
+): FirstMoveAccuracySummary {
+  const firstMoveAssessments = submissions
+    .map((submission) => submission.firstMoveAssessment ?? null)
+    .filter((assessment): assessment is NonNullable<PuzzleSubmissionRecord['firstMoveAssessment']> =>
+      assessment !== null,
+    );
+
+  const validAssessments = firstMoveAssessments.filter(
+    (assessment) => assessment.isValidForFirstMoveAccuracy,
+  );
+  const validAttemptCount = validAssessments.length;
+  const correctCount = validAssessments.filter((assessment) => assessment.isFirstMoveCorrect).length;
+  const accuracyPercent =
+    validAttemptCount > 0 ? Math.round((correctCount / validAttemptCount) * 100) : null;
+
+  const averageTimeToFirstMoveSeconds =
+    validAttemptCount > 0
+      ? validAssessments.reduce((sum, assessment) => sum + assessment.timeToFirstMoveSeconds, 0) /
+        validAttemptCount
+      : null;
+
+  const wrongMoveFrequency = new Map<string, number>();
+  validAssessments.forEach((assessment) => {
+    if (assessment.isFirstMoveCorrect) {
+      return;
+    }
+    const normalizedMove = assessment.firstMove.trim().toLowerCase();
+    if (!normalizedMove) {
+      return;
+    }
+    wrongMoveFrequency.set(normalizedMove, (wrongMoveFrequency.get(normalizedMove) ?? 0) + 1);
+  });
+  const commonWrongFirstMoves = Array.from(wrongMoveFrequency.entries())
+    .map(([move, count]) => ({ move, count }))
+    .sort((a, b) => b.count - a.count || a.move.localeCompare(b.move))
+    .slice(0, 4);
+
+  return {
+    validAttemptCount,
+    correctCount,
+    accuracyPercent,
+    averageTimeToFirstMoveSeconds,
+    commonWrongFirstMoves,
+  };
+}
+
 function AreaChart({
   title,
   subtitle,
@@ -1251,6 +1549,257 @@ function SolveTimeVsDifficultyChart({
           </p>
         </div>
       )}
+    </article>
+  );
+}
+
+function PuzzleRatingProgressionChart({
+  data,
+  sectionStyle,
+  onCollapse,
+}: {
+  data: PuzzleRatingProgressionData;
+  sectionStyle?: React.CSSProperties;
+  onCollapse?: () => void;
+}) {
+  const chartId = useId();
+  const [showAccuracyOverlay, setShowAccuracyOverlay] = useState(false);
+  const eloValues = data.eloValues;
+  const accuracyValues = data.accuracyValues;
+  const axisLabels = data.axisLabels;
+  const hasValues = eloValues.length >= 2;
+  const hasAccuracyOverlay = accuracyValues.length === eloValues.length && accuracyValues.length >= 2;
+  const yAxisTicks = useMemo(() => buildYAxisTicks(eloValues), [eloValues]);
+  const maxElo = yAxisTicks.length > 0 ? Math.max(yAxisTicks[0], 0) : 0;
+  const normalizedEloMax = Math.max(maxElo, 1);
+  const { areaPath, linePath } = useMemo(() => buildChartPaths(eloValues, 860, 190), [eloValues]);
+  const scaledAccuracyValues = useMemo(
+    () =>
+      accuracyValues.map((value) =>
+        (clamp(value, 0, 100) / 100) * normalizedEloMax,
+      ),
+    [accuracyValues, normalizedEloMax],
+  );
+  const accuracyLinePath = useMemo(
+    () => buildLinePathWithMax(scaledAccuracyValues, 860, 190, normalizedEloMax),
+    [scaledAccuracyValues, normalizedEloMax],
+  );
+  const axisTickY = (tick: number) => {
+    const padTop = 18;
+    const usableHeight = 190 - padTop - 16;
+    const normalizedValue = normalizedEloMax > 0 ? tick / normalizedEloMax : 0;
+    return 190 - 12 - normalizedValue * usableHeight;
+  };
+
+  return (
+    <article
+      id={`puzzle-rating-progression-${chartId}`}
+      className="neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between"
+      style={sectionStyle}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Analytics</p>
+          <h3 className="mt-1 text-base font-semibold text-slate-700">Puzzle Rating Progression</h3>
+          <p className="mt-1 text-xs text-slate-500">{data.subtitle}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {hasAccuracyOverlay && (
+            <button
+              type="button"
+              onClick={() => setShowAccuracyOverlay((previous) => !previous)}
+              className="rounded-full neumo-pill px-3 py-1 text-xs font-semibold text-slate-600 inline-flex items-center gap-1.5 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+              style={sectionStyle}
+              aria-pressed={showAccuracyOverlay}
+              aria-label="Toggle accuracy trend overlay"
+            >
+              {showAccuracyOverlay ? 'Hide accuracy overlay' : 'Show accuracy overlay'}
+            </button>
+          )}
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              className="rounded-full neumo-pill px-3 py-1 text-xs font-semibold text-slate-600 inline-flex items-center gap-1.5 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+              style={sectionStyle}
+              aria-label="Collapse puzzle rating progression section"
+            >
+              <ChevronUp className="h-3.5 w-3.5" />
+              Collapse
+            </button>
+          )}
+        </div>
+      </div>
+
+      {!hasValues ? (
+        <p className="mt-3 text-xs text-slate-400">No solved puzzle Elo data yet.</p>
+      ) : (
+        <div className="mt-3">
+          <svg
+            viewBox="-44 0 904 190"
+            className="h-[170px] w-full"
+            role="img"
+            aria-label="Puzzle rating progression line chart"
+          >
+            <defs>
+              <linearGradient id={`${chartId}-rating-fill`} x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="#ffffff" stopOpacity="0.88" />
+                <stop offset="100%" stopColor="#e9eef6" stopOpacity="0.42" />
+              </linearGradient>
+              <linearGradient id={`${chartId}-rating-line`} x1="0" x2="1" y1="0" y2="0">
+                <stop offset="0%" stopColor="#1d4ed8" stopOpacity="0.76" />
+                <stop offset="100%" stopColor="#0891b2" stopOpacity="0.82" />
+              </linearGradient>
+              <linearGradient id={`${chartId}-accuracy-line`} x1="0" x2="1" y1="0" y2="0">
+                <stop offset="0%" stopColor="#d946ef" stopOpacity="0.72" />
+                <stop offset="100%" stopColor="#f97316" stopOpacity="0.78" />
+              </linearGradient>
+            </defs>
+
+            <g stroke="rgba(148,163,184,0.22)" strokeWidth="1">
+              {yAxisTicks.map((tick, idx) => (
+                <line key={`${tick}-${idx}`} x1="0" y1={axisTickY(tick)} x2="860" y2={axisTickY(tick)} />
+              ))}
+              <line x1="0" y1="18" x2="0" y2="178" />
+            </g>
+            <g fill="rgba(100,116,139,0.78)" fontSize="10">
+              {yAxisTicks.map((tick, idx) => (
+                <text key={`rating-y-axis-${tick}-${idx}`} x="-8" y={axisTickY(tick) + 3} textAnchor="end">
+                  {tick}
+                </text>
+              ))}
+            </g>
+
+            <path d={areaPath} fill={`url(#${chartId}-rating-fill)`} />
+            <path
+              d={linePath}
+              fill="none"
+              stroke={`url(#${chartId}-rating-line)`}
+              strokeWidth="3.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {showAccuracyOverlay && hasAccuracyOverlay && (
+              <path
+                d={accuracyLinePath}
+                fill="none"
+                stroke={`url(#${chartId}-accuracy-line)`}
+                strokeWidth="2.4"
+                strokeDasharray="5 5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            )}
+          </svg>
+
+          <div className="mt-2 flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-blue-500/80" />
+              Puzzle Elo
+            </span>
+            {showAccuracyOverlay && hasAccuracyOverlay && (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-fuchsia-500/70" />
+                Accuracy (scaled overlay)
+              </span>
+            )}
+          </div>
+          {showAccuracyOverlay && hasAccuracyOverlay && (
+            <p className="mt-1 text-[11px] text-slate-400">
+              Accuracy overlay is normalized to the Elo axis for visual comparison.
+            </p>
+          )}
+          <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-slate-400 md:text-xs">
+            {axisLabels.map((label, idx) => (
+              <span key={`${label}-${idx}`} className={idx === axisLabels.length - 1 ? 'text-right' : ''}>
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function FirstMoveAccuracyCard({
+  summary,
+  sectionStyle,
+  onCollapse,
+}: {
+  summary: FirstMoveAccuracySummary;
+  sectionStyle?: React.CSSProperties;
+  onCollapse?: () => void;
+}) {
+  const accuracyText =
+    summary.accuracyPercent === null ? 'N/A' : `${summary.accuracyPercent}%`;
+  const avgTimeText =
+    summary.averageTimeToFirstMoveSeconds === null
+      ? 'N/A'
+      : `${summary.averageTimeToFirstMoveSeconds.toFixed(2)}s`;
+
+  return (
+    <article
+      className="neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between"
+      style={sectionStyle}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Analytics</p>
+          <h3 className="mt-1 text-base font-semibold text-slate-700">First-Move Accuracy</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Measures whether the first move matched the best tactical move.
+          </p>
+        </div>
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            className="rounded-full neumo-pill px-3 py-1 text-xs font-semibold text-slate-600 inline-flex items-center gap-1.5 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+            style={sectionStyle}
+            aria-label="Collapse first-move accuracy section"
+          >
+            <ChevronUp className="h-3.5 w-3.5" />
+            Collapse
+          </button>
+        )}
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3 text-[11px]">
+        <div className="rounded-xl border border-slate-200/70 bg-white/25 px-3 py-2">
+          <p className="uppercase tracking-[0.08em] text-slate-400">Accuracy</p>
+          <p className="mt-1 text-base font-semibold text-slate-700">{accuracyText}</p>
+          <p className="mt-1 text-slate-400">
+            {summary.correctCount} / {summary.validAttemptCount} valid attempts
+          </p>
+        </div>
+        <div className="rounded-xl border border-slate-200/70 bg-white/25 px-3 py-2">
+          <p className="uppercase tracking-[0.08em] text-slate-400">Avg first-move time</p>
+          <p className="mt-1 text-base font-semibold text-slate-700">{avgTimeText}</p>
+          <p className="mt-1 text-slate-400">From valid attempted puzzles</p>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-xl border border-slate-200/70 bg-white/25 px-3 py-2">
+        <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Common wrong first moves</p>
+        {summary.commonWrongFirstMoves.length === 0 ? (
+          <p className="mt-2 text-[11px] text-slate-400">No wrong first-move patterns yet.</p>
+        ) : (
+          <div className="mt-2 space-y-1.5">
+            {summary.commonWrongFirstMoves.map((entry) => (
+              <div
+                key={`${entry.move}-${entry.count}`}
+                className="flex items-center justify-between gap-2 text-[11px]"
+              >
+                <span className="font-medium text-slate-600">{entry.move}</span>
+                <span className="rounded-full px-2 py-0.5 text-slate-600 bg-slate-100">
+                  {entry.count}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </article>
   );
 }
@@ -1740,16 +2289,22 @@ export default function DashboardPage() {
   const { theme, resolvedTheme, setTheme } = useTheme();
   const { user } = useUser();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedSection = searchParams.get('section')?.trim().toLowerCase() ?? null;
+  const initialNavLabel =
+    NAV_ITEMS.find((item) => item.label.toLowerCase() === requestedSection)?.label ?? 'Dashboard';
   const isMounted = useSyncExternalStore(
     () => () => {},
     () => true,
     () => false,
   );
-  const [activeNavLabel, setActiveNavLabel] = useState<string>('Dashboard');
+  const [activeNavLabel, setActiveNavLabel] = useState<string>(initialNavLabel);
   const [activeRange, setActiveRange] = useState<(typeof RANGE_TABS)[number]>('Today');
   const [selectedAnalyticsTheme, setSelectedAnalyticsTheme] = useState<AnalyticsTheme | null>(null);
   const [isAnalyticsSectionsOpen, setIsAnalyticsSectionsOpen] = useState(true);
   const [isSolveTimeSectionOpen, setIsSolveTimeSectionOpen] = useState(true);
+  const [isRatingProgressionSectionOpen, setIsRatingProgressionSectionOpen] = useState(true);
+  const [isFirstMoveAccuracySectionOpen, setIsFirstMoveAccuracySectionOpen] = useState(true);
   const [isTransitioningToChessApp, setIsTransitioningToChessApp] = useState(false);
   const [showSubmissionHistory, setShowSubmissionHistory] = useState(false);
   const [submissions, setSubmissions] = useState<PuzzleSubmissionRecord[]>([]);
@@ -2089,6 +2644,14 @@ export default function DashboardPage() {
     () => buildSolveTimeDifficultyData(submissions),
     [submissions],
   );
+  const puzzleRatingProgressionData = useMemo(
+    () => buildPuzzleRatingProgressionData(activeRange, submissions),
+    [activeRange, submissions],
+  );
+  const firstMoveAccuracySummary = useMemo(
+    () => buildFirstMoveAccuracySummary(submissions),
+    [submissions],
+  );
   const activeAnalyticsTheme = selectedAnalyticsTheme ?? themeAnalytics.weakestTheme;
   const selectedThemeRow =
     themeAnalytics.rows.find((row) => row.theme === activeAnalyticsTheme) ?? themeAnalytics.rows[0];
@@ -2135,6 +2698,7 @@ export default function DashboardPage() {
     : undefined;
   const isDashboardView = activeNavLabel === 'Dashboard';
   const isAnalyticsView = activeNavLabel === 'Analytics';
+  const isAgentView = activeNavLabel === 'Agent';
   const isSettingsView = activeNavLabel === 'Settings';
   const dashboardContainerStyle = dashboardPanelStyle;
   const dashboardButtonStyle = dashboardPanelStyle;
@@ -2165,23 +2729,32 @@ export default function DashboardPage() {
         <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
           <aside className="neumo-surface-soft rounded-[26px] p-6 md:p-7" style={dashboardContainerStyle}>
             <div className="flex items-center gap-3">
-              <div className="relative h-10 w-10">
-                <span
-                  className="absolute left-0 top-1 h-7 w-7 rounded-full shadow-md"
-                  style={{
-                    background: `linear-gradient(135deg, ${rgbaFromChannels(accentChannels, 0.35)} 0%, ${rgbaFromChannels(accentChannels, 0.9)} 100%)`,
-                  }}
-                />
-                <span
-                  className="absolute left-3 top-4 h-7 w-7 rounded-full shadow-md"
-                  style={{
-                    background: `linear-gradient(135deg, ${rgbaFromChannels(accentChannels, 0.7)} 0%, ${rgbaFromChannels(secondaryChannels, 0.95)} 100%)`,
-                  }}
-                />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl neumo-inset">
+                <svg viewBox="0 0 24 24" className="h-7 w-7 drop-shadow-sm" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="dashboard-knight-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor={rgbaFromChannels(accentChannels, 0.95)} />
+                      <stop offset="100%" stopColor={rgbaFromChannels(secondaryChannels, 0.95)} />
+                    </linearGradient>
+                  </defs>
+                  <text
+                    x="12"
+                    y="16.8"
+                    textAnchor="middle"
+                    fill="url(#dashboard-knight-gradient)"
+                    style={{
+                      fontSize: '16px',
+                      fontWeight: 700,
+                      fontFamily: '"Segoe UI Symbol", "Noto Sans Symbols", "DejaVu Sans", serif',
+                    }}
+                  >
+                    {'\u265E'}
+                  </text>
+                </svg>
               </div>
               <div>
                 <p className="text-xs uppercase tracking-[0.14em] font-semibold" style={brandTextStyle}>
-                  Chess App
+                  Terrible App Chess
                 </p>
                 <p className="text-lg font-semibold text-slate-700">Dashboard</p>
               </div>
@@ -2644,6 +3217,70 @@ export default function DashboardPage() {
                               </p>
                             </button>
                           )
+                        ) : title === 'Puzzle Rating Progression' ? (
+                          isRatingProgressionSectionOpen ? (
+                            <PuzzleRatingProgressionChart
+                              key={title}
+                              data={puzzleRatingProgressionData}
+                              sectionStyle={dashboardContainerStyle}
+                              onCollapse={() => setIsRatingProgressionSectionOpen(false)}
+                            />
+                          ) : (
+                            <button
+                              key={title}
+                              type="button"
+                              onClick={() => setIsRatingProgressionSectionOpen(true)}
+                              className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+                              style={dashboardContainerStyle}
+                              aria-expanded={false}
+                              aria-label="Expand puzzle rating progression section"
+                            >
+                              <div>
+                                <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">
+                                  Analytics
+                                </p>
+                                <h3 className="mt-1 text-base font-semibold text-slate-700">
+                                  Puzzle Rating Progression
+                                </h3>
+                              </div>
+                              <p className="text-xs text-slate-400 inline-flex items-center gap-1.5">
+                                <ChevronDown className="h-3.5 w-3.5" />
+                                Click to expand
+                              </p>
+                            </button>
+                          )
+                        ) : title === 'First-Move Accuracy' ? (
+                          isFirstMoveAccuracySectionOpen ? (
+                            <FirstMoveAccuracyCard
+                              key={title}
+                              summary={firstMoveAccuracySummary}
+                              sectionStyle={dashboardContainerStyle}
+                              onCollapse={() => setIsFirstMoveAccuracySectionOpen(false)}
+                            />
+                          ) : (
+                            <button
+                              key={title}
+                              type="button"
+                              onClick={() => setIsFirstMoveAccuracySectionOpen(true)}
+                              className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+                              style={dashboardContainerStyle}
+                              aria-expanded={false}
+                              aria-label="Expand first-move accuracy section"
+                            >
+                              <div>
+                                <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">
+                                  Analytics
+                                </p>
+                                <h3 className="mt-1 text-base font-semibold text-slate-700">
+                                  First-Move Accuracy
+                                </h3>
+                              </div>
+                              <p className="text-xs text-slate-400 inline-flex items-center gap-1.5">
+                                <ChevronDown className="h-3.5 w-3.5" />
+                                Click to expand
+                              </p>
+                            </button>
+                          )
                         ) : (
                           <article
                             key={title}
@@ -2707,6 +3344,70 @@ export default function DashboardPage() {
                               </p>
                               <h3 className="mt-1 text-base font-semibold text-slate-700">
                                 Solve Time vs Difficulty
+                              </h3>
+                            </div>
+                            <p className="text-xs text-slate-400 inline-flex items-center gap-1.5">
+                              <ChevronDown className="h-3.5 w-3.5" />
+                              Click to expand
+                            </p>
+                          </button>
+                        )
+                      ) : title === 'Puzzle Rating Progression' ? (
+                        isRatingProgressionSectionOpen ? (
+                          <PuzzleRatingProgressionChart
+                            key={title}
+                            data={puzzleRatingProgressionData}
+                            sectionStyle={dashboardContainerStyle}
+                            onCollapse={() => setIsRatingProgressionSectionOpen(false)}
+                          />
+                        ) : (
+                          <button
+                            key={title}
+                            type="button"
+                            onClick={() => setIsRatingProgressionSectionOpen(true)}
+                            className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+                            style={dashboardContainerStyle}
+                            aria-expanded={false}
+                            aria-label="Expand puzzle rating progression section"
+                          >
+                            <div>
+                              <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">
+                                Analytics
+                              </p>
+                              <h3 className="mt-1 text-base font-semibold text-slate-700">
+                                Puzzle Rating Progression
+                              </h3>
+                            </div>
+                            <p className="text-xs text-slate-400 inline-flex items-center gap-1.5">
+                              <ChevronDown className="h-3.5 w-3.5" />
+                              Click to expand
+                            </p>
+                          </button>
+                        )
+                      ) : title === 'First-Move Accuracy' ? (
+                        isFirstMoveAccuracySectionOpen ? (
+                          <FirstMoveAccuracyCard
+                            key={title}
+                            summary={firstMoveAccuracySummary}
+                            sectionStyle={dashboardContainerStyle}
+                            onCollapse={() => setIsFirstMoveAccuracySectionOpen(false)}
+                          />
+                        ) : (
+                          <button
+                            key={title}
+                            type="button"
+                            onClick={() => setIsFirstMoveAccuracySectionOpen(true)}
+                            className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+                            style={dashboardContainerStyle}
+                            aria-expanded={false}
+                            aria-label="Expand first-move accuracy section"
+                          >
+                            <div>
+                              <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">
+                                Analytics
+                              </p>
+                              <h3 className="mt-1 text-base font-semibold text-slate-700">
+                                First-Move Accuracy
                               </h3>
                             </div>
                             <p className="text-xs text-slate-400 inline-flex items-center gap-1.5">
@@ -2935,7 +3636,9 @@ export default function DashboardPage() {
               />
             )}
 
-            {!isDashboardView && !isAnalyticsView && !isSettingsView && (
+            {isAgentView && <AgentPage panelStyle={dashboardContainerStyle} />}
+
+            {!isDashboardView && !isAnalyticsView && !isAgentView && !isSettingsView && (
               <section
                 className="neumo-surface-soft rounded-[26px] p-5 md:p-7"
                 style={dashboardContainerStyle}
@@ -2952,3 +3655,4 @@ export default function DashboardPage() {
     </main>
   );
 }
+

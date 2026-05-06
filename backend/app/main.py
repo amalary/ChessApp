@@ -1,16 +1,29 @@
 import os
 import shutil
+import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import chess
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+import redis.asyncio as redis
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth, health
-from app.services.board_validate import board_map_to_fen, rotate_board_map_180
-from app.services.board_validation import validate_fen
+from app.middleware.rate_limit_middleware import rate_limit_middleware
+from app.routers import assistant, auth, health
 from app.services.gemini_fen import fen_from_image_bytes
 from app.services.mate_solver import find_mate_in_1_to_3
+from app.services.protection_service import (
+    RateLimitViolation,
+    clear_failed_solve_attempts,
+    enforce_engine_lock,
+    record_failed_solve_attempt,
+    rate_limited_response,
+    validate_solve_upload,
+    ValidatedSolveUpload,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def _load_env_file(path: Path) -> None:
@@ -46,16 +59,6 @@ def _bootstrap_env() -> None:
 _bootstrap_env()
 
 
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
-
-
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
     if raw is None:
@@ -66,73 +69,30 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _normalize_side(side: str | None) -> str | None:
-    if not side:
-        return None
-    lowered = side.strip().lower()
-    if lowered in {"white", "w"}:
-        return "white"
-    if lowered in {"black", "b"}:
-        return "black"
-    return None
+redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 
-def _board_map_from_fen(fen: str) -> dict[str, str]:
-    board = chess.Board(fen)
-    board_map = {chess.square_name(sq): "." for sq in chess.SQUARES}
-    for sq, piece in board.piece_map().items():
-        board_map[chess.square_name(sq)] = piece.symbol()
-    return board_map
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.redis_client = redis.from_url(
+        redis_url,
+        encoding="utf-8",
+        decode_responses=True,
+    )
+    try:
+        await app.state.redis_client.ping()
+    except Exception as exc:
+        logger.exception("Failed to connect to Redis at startup.")
+        raise RuntimeError("Redis is required for /solve rate limiting.") from exc
+    try:
+        yield
+    finally:
+        redis_client = getattr(app.state, "redis_client", None)
+        if redis_client is not None:
+            await redis_client.close()
 
 
-def _build_fallback_fens(fen: str, expected_side: str | None) -> list[str]:
-    board = chess.Board(fen)
-    board_map = _board_map_from_fen(fen)
-    rotated_map = rotate_board_map_180(board_map)
-
-    current_side = "white" if board.turn else "black"
-    sides = [current_side]
-    if expected_side in {"white", "black"} and expected_side not in sides:
-        sides.insert(0, expected_side)
-
-    ordered: list[str] = []
-    for side in sides:
-        ordered.append(board_map_to_fen(board_map, side))
-        ordered.append(board_map_to_fen(rotated_map, side))
-
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for candidate in ordered:
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        deduped.append(candidate)
-    return deduped
-
-
-def _candidate_score(
-    candidate_fen: str,
-    mate_result,
-    preferred_fen: str,
-    expected_side: str | None,
-) -> float:
-    score = 0.0
-    if mate_result is not None:
-        score += 2.0
-        score += max(0.0, 0.55 - (mate_result.mate_in * 0.12))
-    if candidate_fen == preferred_fen:
-        score += 0.2
-    if expected_side in {"white", "black"}:
-        try:
-            side = "white" if chess.Board(candidate_fen).turn else "black"
-            if side == expected_side:
-                score += 0.25
-        except Exception:
-            pass
-    return score
-
-
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 origins = [
     "http://localhost:3000",
@@ -156,6 +116,17 @@ app.add_middleware(
 # Existing health router
 app.include_router(health.router)
 app.include_router(auth.router)
+app.include_router(assistant.router)
+
+
+@app.exception_handler(RateLimitViolation)
+async def rate_limit_violation_handler(_: Request, exc: RateLimitViolation):
+    return rate_limited_response(message=exc.message, retry_after=exc.retry_after)
+
+
+@app.middleware("http")
+async def global_protection_middleware(request: Request, call_next):
+    return await rate_limit_middleware(request, call_next)
 
 
 @app.get("/")
@@ -163,22 +134,20 @@ async def root():
     return {"message": "Backend is running"}
 
 
-# Temporarily open for testing without Auth0
 @app.post("/solve")
 async def solve(
-    image: UploadFile = File(...),
+    request: Request,
+    upload: ValidatedSolveUpload = Depends(validate_solve_upload),
+    _engine_guard: None = Depends(enforce_engine_lock),
     expected_side_to_move: str | None = Form(None),
 ):
     try:
-        image_bytes = await image.read()
-
-        if not image_bytes:
-            raise HTTPException(status_code=400, detail="No image uploaded")
+        image_bytes = upload.data
 
         # 1) Gemini Vision -> FEN
         gemini_result = fen_from_image_bytes(
             image_bytes,
-            image.filename,
+            upload.filename,
             expected_side_to_move=expected_side_to_move,
             attempts=max(1, _env_int("GEMINI_TRANSCRIBE_ATTEMPTS", 5)),
         )
@@ -216,60 +185,11 @@ async def solve(
         result = find_mate_in_1_to_3(
             fen=fen,
             stockfish_path=stockfish_path,
+            think_time_s=2.0,
+            max_mate=3,
         )
-
-        expected_side = _normalize_side(expected_side_to_move)
-        fallback_confidence_threshold = max(
-            0.0, min(1.0, _env_float("SOLVE_FALLBACK_CONFIDENCE", 0.90))
-        )
-        should_run_fallback = (result is None) or (
-            float(confidence) < fallback_confidence_threshold
-        )
-
-        if should_run_fallback:
-            fallback_fens = _build_fallback_fens(fen, expected_side)
-            fallback_think_time_s = max(
-                0.6, _env_float("SOLVE_FALLBACK_THINK_TIME_S", 2.5)
-            )
-            fallback_max_depth = max(10, _env_int("SOLVE_FALLBACK_MAX_DEPTH", 24))
-
-            best_fen = fen
-            best_result = result
-            best_score = _candidate_score(
-                candidate_fen=fen,
-                mate_result=result,
-                preferred_fen=fen,
-                expected_side=expected_side,
-            )
-
-            for candidate_fen in fallback_fens:
-                if candidate_fen == fen:
-                    continue
-                if not validate_fen(candidate_fen).passed:
-                    continue
-
-                candidate_result = find_mate_in_1_to_3(
-                    fen=candidate_fen,
-                    stockfish_path=stockfish_path,
-                    think_time_s=fallback_think_time_s,
-                    max_depth=fallback_max_depth,
-                )
-                score = _candidate_score(
-                    candidate_fen=candidate_fen,
-                    mate_result=candidate_result,
-                    preferred_fen=fen,
-                    expected_side=expected_side,
-                )
-                if score > best_score:
-                    best_score = score
-                    best_fen = candidate_fen
-                    best_result = candidate_result
-
-            fen = best_fen
-            result = best_result
-            gemini_result["side_to_move"] = (
-                "white" if chess.Board(fen).turn else "black"
-            )
+        gemini_result["side_to_move"] = "white" if chess.Board(fen).turn else "black"
+        await clear_failed_solve_attempts(request)
 
         # 4) Response
         return {
@@ -283,7 +203,9 @@ async def solve(
             "moves_uci": result.moves_uci if result else [],
         }
 
-    except HTTPException:
+    except HTTPException as exc:
+        if exc.status_code in {400, 422}:
+            await record_failed_solve_attempt(request)
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
