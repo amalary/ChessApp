@@ -11,6 +11,7 @@ import {
   estimatePuzzleElo,
   FirstMoveAssessmentStatus,
   getPuzzleSubmissionUpdateEventName,
+  type PuzzleSubmissionRecord,
   getUnseenPuzzleSubmissionCount,
   replacePuzzleSubmissions,
 } from '@/lib/puzzle-submissions';
@@ -471,7 +472,7 @@ export default function SolveTestClient() {
         if (cancelled || !Array.isArray(payload)) {
           return;
         }
-        replacePuzzleSubmissions(payload as any);
+        replacePuzzleSubmissions(payload as PuzzleSubmissionRecord[]);
       } catch {
         // Keep local-only behavior when backend history fetch fails.
       }
@@ -565,6 +566,11 @@ export default function SolveTestClient() {
     const formData = new FormData();
     formData.append('image', file);
     formData.append('expected_side_to_move', queenIsWhite ? 'white' : 'black');
+    formData.append('first_move_uci', firstMoveAttempt.moveUci);
+    formData.append('time_to_first_move_seconds', String(firstMoveAttempt.timeToFirstMoveSeconds));
+    formData.append('attempt_id', attemptId);
+    formData.append('attempt_created_at', firstMoveAttempt.createdAt);
+    formData.append('puzzle_id', createPuzzleId(null, file));
     const solveStartedAt = performance.now();
 
     setLoading(true);

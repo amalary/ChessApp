@@ -22,6 +22,8 @@ class LocalAuthPuzzleSubmission(Base):
     fen = Column(Text, nullable=True)
     solve_time_ms = Column(Integer, nullable=True)
     puzzle_elo = Column(Integer, nullable=True)
+    difficulty_rating = Column(Integer, nullable=True)
+    estimated_difficulty_rating = Column(Integer, nullable=True)
     position_check = Column(JSON, nullable=True)
     solution_lines = Column(JSON, nullable=False, default=list)
     first_move_assessment = Column(JSON, nullable=True)

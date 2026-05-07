@@ -94,8 +94,10 @@ Backend response includes:
 - Re-check critical lines on the board.
 
 ## Planned or Partial Areas
-- **Planned feature — not currently available:** documentation-grounded retrieval (RAG) for broader app help.
+- **Planned feature ï¿½ not currently available:** documentation-grounded retrieval (RAG) for broader app help.
 - Current app-navigation answers are keyword-based, not yet retrieval-backed.
 - Theme classification is heuristic and may be conservative.
 
 <!-- REVIEW_NEEDED: Confirm rollout status for production Auth0 session support in the Agent UI path. -->
+
+*Will have to tackle soon. * 

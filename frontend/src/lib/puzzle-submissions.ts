@@ -30,6 +30,8 @@ export type PuzzleSubmissionRecord = {
   fen?: string | null;
   solveTimeMs?: number | null;
   puzzleElo?: number | null;
+  difficultyRating?: number | null;
+  estimatedDifficultyRating?: number | null;
   originalPuzzleImageDataUrl?: string | null;
   positionCheck: SubmissionPositionCheck;
   solutionLines: string[];
@@ -94,6 +96,18 @@ function isSubmissionRecord(value: unknown): value is PuzzleSubmissionRecord {
         Number.isFinite(candidate.puzzleElo) &&
         candidate.puzzleElo >= 100 &&
         candidate.puzzleElo <= 4000)) &&
+    (candidate.difficultyRating === undefined ||
+      candidate.difficultyRating === null ||
+      (typeof candidate.difficultyRating === 'number' &&
+        Number.isFinite(candidate.difficultyRating) &&
+        candidate.difficultyRating >= 100 &&
+        candidate.difficultyRating <= 4000)) &&
+    (candidate.estimatedDifficultyRating === undefined ||
+      candidate.estimatedDifficultyRating === null ||
+      (typeof candidate.estimatedDifficultyRating === 'number' &&
+        Number.isFinite(candidate.estimatedDifficultyRating) &&
+        candidate.estimatedDifficultyRating >= 100 &&
+        candidate.estimatedDifficultyRating <= 4000)) &&
     (candidate.originalPuzzleImageDataUrl === undefined ||
       candidate.originalPuzzleImageDataUrl === null ||
       typeof candidate.originalPuzzleImageDataUrl === 'string') &&

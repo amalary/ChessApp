@@ -1,6 +1,8 @@
 import os
+import re
 import shutil
 import logging
+from datetime import datetime
 from time import perf_counter
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,6 +22,7 @@ from app.routers import assistant, auth, health, puzzles
 from app.services.gemini_fen import fen_from_image_bytes
 from app.services.mate_solver import find_mate_in_1_to_3
 from app.services.puzzle_submission_service import create_submission_for_user
+from app.services.puzzle_submission_service import estimate_puzzle_difficulty_rating
 from app.services.protection_service import (
     RateLimitViolation,
     clear_failed_solve_attempts,
@@ -38,6 +41,7 @@ STOCKFISH_NOT_FOUND_DETAIL = (
     "Stockfish not found. Install Stockfish locally and set STOCKFISH_PATH "
     "to the executable path."
 )
+UCI_MOVE_PATTERN = re.compile(r"^[a-h][1-8][a-h][1-8][qrbn]?$")
 
 
 def _load_env_file(path: Path) -> None:
@@ -83,6 +87,133 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _normalize_uci_move(value: str | None) -> str | None:
+    if value is None:
+        return None
+    candidate = value.strip().lower()
+    if not candidate:
+        return None
+    if not UCI_MOVE_PATTERN.fullmatch(candidate):
+        return None
+    return candidate
+
+
+def _extract_first_uci_move(result: object | None) -> str | None:
+    if result is None:
+        return None
+    moves = getattr(result, "moves_uci", None)
+    if not isinstance(moves, list):
+        return None
+    for move in moves:
+        if isinstance(move, str):
+            normalized = _normalize_uci_move(move)
+            if normalized:
+                return normalized
+    return None
+
+
+def _classify_first_move(
+    attempted_move: str | None, best_move: str | None
+) -> tuple[str, bool]:
+    normalized_attempt = _normalize_uci_move(attempted_move)
+    normalized_best = _normalize_uci_move(best_move)
+    if normalized_attempt is None or normalized_best is None:
+        return "incorrect", False
+
+    attempt_core = normalized_attempt[:4]
+    best_core = normalized_best[:4]
+    if attempt_core == best_core:
+        return "correct", True
+
+    same_source = attempt_core[:2] == best_core[:2]
+    same_destination = attempt_core[2:4] == best_core[2:4]
+    if same_source or same_destination:
+        return "almost_correct", False
+    return "incorrect", False
+
+
+def _build_first_move_assessment(
+    *,
+    first_move_uci: str | None,
+    time_to_first_move_seconds: float | None,
+    best_move: str | None,
+    confidence: float,
+    fen: str,
+    result: object | None,
+    puzzle_id: str | None,
+    attempt_id: str | None,
+    attempt_created_at: str | None,
+    user_id: str | None,
+) -> dict | None:
+    normalized_first_move = _normalize_uci_move(first_move_uci)
+    if normalized_first_move is None:
+        return None
+
+    status, is_first_move_correct = _classify_first_move(
+        normalized_first_move, best_move
+    )
+    first_move_threshold = max(0.0, min(1.0, _env_float("FIRST_MOVE_MIN_CONFIDENCE", 0.75)))
+    invalid_reason = None
+
+    if confidence < first_move_threshold:
+        invalid_reason = "low_vision_confidence"
+    else:
+        try:
+            board = chess.Board(fen)
+            if not board.is_valid():
+                invalid_reason = "invalid_fen"
+        except Exception:
+            invalid_reason = "invalid_fen"
+
+    if invalid_reason is None and (result is None or best_move is None):
+        invalid_reason = "stockfish_no_mate"
+
+    is_valid_for_first_move_accuracy = invalid_reason is None
+    normalized_time = (
+        round(max(0.0, float(time_to_first_move_seconds or 0.0)), 2)
+        if isinstance(time_to_first_move_seconds, (int, float))
+        else 0.0
+    )
+    normalized_puzzle_id = (
+        puzzle_id.strip()
+        if isinstance(puzzle_id, str) and puzzle_id.strip()
+        else f"fen:{fen.strip()}"
+    )
+    normalized_attempt_id = (
+        attempt_id.strip()
+        if isinstance(attempt_id, str) and attempt_id.strip()
+        else f"attempt-{int(perf_counter() * 1000)}"
+    )
+    normalized_created_at = (
+        attempt_created_at.strip()
+        if isinstance(attempt_created_at, str) and attempt_created_at.strip()
+        else datetime.utcnow().isoformat()
+    )
+    return {
+        "firstMove": normalized_first_move,
+        "bestMove": best_move,
+        "isFirstMoveCorrect": is_first_move_correct,
+        "status": status,
+        "timeToFirstMoveSeconds": normalized_time,
+        "puzzleId": normalized_puzzle_id,
+        "userId": user_id,
+        "attemptId": normalized_attempt_id,
+        "createdAt": normalized_created_at,
+        "isValidForFirstMoveAccuracy": is_valid_for_first_move_accuracy,
+        "invalidReason": invalid_reason,
+    }
+
+
 def _validate_fen_or_raise(fen: str) -> chess.Board:
     try:
         board = chess.Board(fen)
@@ -117,7 +248,38 @@ def _persist_local_auth_submission(
     confidence: float,
     gemini_result: dict,
     result: object,
+    first_move_uci: str | None,
+    time_to_first_move_seconds: float | None,
+    difficulty_rating: int | None,
+    puzzle_id: str | None,
+    attempt_id: str | None,
+    attempt_created_at: str | None,
 ) -> None:
+    best_move = _extract_first_uci_move(result)
+    first_move_assessment = _build_first_move_assessment(
+        first_move_uci=first_move_uci,
+        time_to_first_move_seconds=time_to_first_move_seconds,
+        best_move=best_move,
+        confidence=confidence,
+        fen=fen,
+        result=result,
+        puzzle_id=puzzle_id,
+        attempt_id=attempt_id,
+        attempt_created_at=attempt_created_at,
+        user_id=str(local_auth_user.id),
+    )
+    estimated_difficulty_rating = estimate_puzzle_difficulty_rating(
+        solve_time_ms=solve_time_ms,
+        mate_in=result.mate_in if result else None,
+        confidence=confidence,
+        attempts_used=gemini_result.get("attempts_used"),
+        solution_lines=result.moves_san if result else [],
+    )
+    normalized_difficulty_rating = (
+        difficulty_rating
+        if isinstance(difficulty_rating, int) and 100 <= difficulty_rating <= 4000
+        else None
+    )
     create_submission_for_user(
         db=db,
         payload=PuzzleSubmissionCreate(
@@ -126,7 +288,9 @@ def _persist_local_auth_submission(
             expected_side_to_move=expected_side_to_move,
             fen=fen,
             solve_time_ms=solve_time_ms,
-            puzzle_elo=None,
+            puzzle_elo=normalized_difficulty_rating or estimated_difficulty_rating,
+            difficulty_rating=normalized_difficulty_rating,
+            estimated_difficulty_rating=estimated_difficulty_rating,
             position_check={
                 "sideToMove": gemini_result.get("side_to_move"),
                 "confidence": confidence,
@@ -135,7 +299,7 @@ def _persist_local_auth_submission(
                 "mateIn": result.mate_in if result else None,
             },
             solution_lines=result.moves_san if result else [],
-            first_move_assessment=None,
+            first_move_assessment=first_move_assessment,
         ),
     )
 
@@ -213,6 +377,12 @@ async def solve(
     upload: ValidatedSolveUpload = Depends(validate_solve_upload),
     _engine_guard: None = Depends(enforce_engine_lock),
     expected_side_to_move: str | None = Form(None),
+    first_move_uci: str | None = Form(None),
+    time_to_first_move_seconds: float | None = Form(None),
+    difficulty_rating: int | None = Form(None),
+    puzzle_id: str | None = Form(None),
+    attempt_id: str | None = Form(None),
+    attempt_created_at: str | None = Form(None),
     db: Session = Depends(get_db),
     local_auth_user: LocalAuthUser | None = Depends(get_optional_local_auth_user),
 ):
@@ -257,6 +427,12 @@ async def solve(
                 confidence=confidence,
                 gemini_result=gemini_result,
                 result=result,
+                first_move_uci=first_move_uci,
+                time_to_first_move_seconds=time_to_first_move_seconds,
+                difficulty_rating=difficulty_rating,
+                puzzle_id=puzzle_id,
+                attempt_id=attempt_id,
+                attempt_created_at=attempt_created_at,
             )
 
         # 4) Response

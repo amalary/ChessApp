@@ -7,7 +7,9 @@ from app.db_auth import get_db
 from app.local_auth_user import get_required_local_auth_user
 from app.models_auth import LocalAuthUser
 from app.services.puzzle_submission_service import (
+    DifficultyBucketAnalyticsResponse,
     PuzzleSubmissionResponse,
+    get_difficulty_bucket_analytics_for_user,
     list_submissions_for_user,
 )
 
@@ -21,3 +23,14 @@ def list_puzzle_submissions(
     current_user: LocalAuthUser = Depends(get_required_local_auth_user),
 ):
     return list_submissions_for_user(db=db, current_user=current_user, limit=limit)
+
+
+@router.get(
+    "/analytics/difficulty-buckets",
+    response_model=DifficultyBucketAnalyticsResponse,
+)
+def get_difficulty_bucket_analytics(
+    db: Session = Depends(get_db),
+    current_user: LocalAuthUser = Depends(get_required_local_auth_user),
+):
+    return get_difficulty_bucket_analytics_for_user(db=db, current_user=current_user)

@@ -17,6 +17,8 @@ class PuzzleSubmissionCreate:
     fen: str | None
     solve_time_ms: int | None
     puzzle_elo: int | None
+    difficulty_rating: int | None
+    estimated_difficulty_rating: int | None
     position_check: dict
     solution_lines: list[str]
     first_move_assessment: dict | None
@@ -53,6 +55,8 @@ def create_submission(
         fen=payload.fen,
         solve_time_ms=payload.solve_time_ms,
         puzzle_elo=payload.puzzle_elo,
+        difficulty_rating=payload.difficulty_rating,
+        estimated_difficulty_rating=payload.estimated_difficulty_rating,
         position_check=payload.position_check,
         solution_lines=payload.solution_lines,
         first_move_assessment=payload.first_move_assessment,
@@ -61,4 +65,3 @@ def create_submission(
     db.commit()
     db.refresh(row)
     return row
-

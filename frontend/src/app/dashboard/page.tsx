@@ -17,6 +17,7 @@ import {
   Settings,
 } from 'lucide-react';
 import { AgentPage } from './agent-panel';
+import { PuzzleLabPanel } from './puzzle-lab-panel';
 import {
   getPuzzleSubmissionUpdateEventName,
   estimatePuzzleElo,
@@ -25,6 +26,7 @@ import {
   type PuzzleSubmissionRecord,
 } from '@/lib/puzzle-submissions';
 import {
+  readActiveLocalAuthUser,
   readScopedStorageValue,
   resolveUserSettingsScope,
   writeScopedStorageValue,
@@ -163,6 +165,20 @@ type FirstMoveAccuracySummary = {
     move: string;
     count: number;
   }>;
+};
+
+type DifficultyBucketAnalyticsBucket = {
+  label: string;
+  totalAttempts: number;
+  correctAttempts: number;
+  accuracyPercentage: number;
+  averageSolveTimeSeconds: number | null;
+};
+
+type DifficultyBucketAnalyticsData = {
+  difficultyBuckets: DifficultyBucketAnalyticsBucket[];
+  totalValidAttempts: number;
+  confidenceThreshold: number;
 };
 
 function normalizeHexColor(value: string | null | undefined): string | null {
@@ -529,6 +545,140 @@ function formatSolveTimeMs(milliseconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = Math.round(totalSeconds % 60);
   return `${minutes}m ${seconds}s`;
+}
+
+function formatSolveTimeSeconds(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remaining = Math.round(seconds % 60);
+  return `${minutes}m ${remaining}s`;
+}
+
+function formatDifficultyBucketLabel(label: string): string {
+  if (label.includes('+')) {
+    return label;
+  }
+  const [start, end] = label.split('-');
+  if (!start || !end) {
+    return label;
+  }
+  return `${start}\u2013${end}`;
+}
+
+function normalizeDifficultyBucketAnalyticsPayload(
+  payload: unknown,
+): DifficultyBucketAnalyticsData | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const candidate = payload as Record<string, unknown>;
+  if (!Array.isArray(candidate.difficulty_buckets)) {
+    return null;
+  }
+
+  const buckets = candidate.difficulty_buckets
+    .map((row): DifficultyBucketAnalyticsBucket | null => {
+      if (!row || typeof row !== 'object') {
+        return null;
+      }
+      const entry = row as Record<string, unknown>;
+      if (typeof entry.label !== 'string') {
+        return null;
+      }
+      const totalAttempts =
+        typeof entry.total_attempts === 'number' && Number.isFinite(entry.total_attempts)
+          ? Math.max(0, Math.floor(entry.total_attempts))
+          : 0;
+      const correctAttempts =
+        typeof entry.correct_attempts === 'number' && Number.isFinite(entry.correct_attempts)
+          ? Math.max(0, Math.floor(entry.correct_attempts))
+          : 0;
+      const accuracyPercentage =
+        typeof entry.accuracy_percentage === 'number' && Number.isFinite(entry.accuracy_percentage)
+          ? clamp(entry.accuracy_percentage, 0, 100)
+          : 0;
+      const averageSolveTimeSeconds =
+        typeof entry.average_solve_time_seconds === 'number' &&
+        Number.isFinite(entry.average_solve_time_seconds) &&
+        entry.average_solve_time_seconds >= 0
+          ? entry.average_solve_time_seconds
+          : null;
+
+      return {
+        label: entry.label,
+        totalAttempts,
+        correctAttempts: Math.min(totalAttempts, correctAttempts),
+        accuracyPercentage,
+        averageSolveTimeSeconds,
+      };
+    })
+    .filter((row): row is DifficultyBucketAnalyticsBucket => row !== null);
+
+  const totalValidAttempts =
+    typeof candidate.total_valid_attempts === 'number' && Number.isFinite(candidate.total_valid_attempts)
+      ? Math.max(0, Math.floor(candidate.total_valid_attempts))
+      : buckets.reduce((sum, bucket) => sum + bucket.totalAttempts, 0);
+  const confidenceThreshold =
+    typeof candidate.confidence_threshold === 'number' && Number.isFinite(candidate.confidence_threshold)
+      ? clamp(candidate.confidence_threshold, 0, 1)
+      : 0.75;
+
+  return {
+    difficultyBuckets: buckets,
+    totalValidAttempts,
+    confidenceThreshold,
+  };
+}
+
+function resolveDifficultyInsight(
+  analytics: DifficultyBucketAnalyticsData | null,
+): { message: string; highlightLabel: string | null } {
+  const defaultMessage = 'Solve more puzzles to unlock difficulty insights.';
+  if (!analytics || analytics.totalValidAttempts < 6) {
+    return { message: defaultMessage, highlightLabel: null };
+  }
+
+  const bucketsWithData = analytics.difficultyBuckets.filter((bucket) => bucket.totalAttempts >= 2);
+  if (bucketsWithData.length < 2) {
+    return { message: defaultMessage, highlightLabel: null };
+  }
+
+  let largestDrop = 0;
+  let dropLabel: string | null = null;
+  for (let index = 1; index < bucketsWithData.length; index += 1) {
+    const previous = bucketsWithData[index - 1];
+    const current = bucketsWithData[index];
+    const drop = previous.accuracyPercentage - current.accuracyPercentage;
+    if (drop > largestDrop) {
+      largestDrop = drop;
+      dropLabel = current.label;
+    }
+  }
+
+  if (dropLabel && largestDrop >= 6) {
+    return {
+      message: `You start struggling around ${formatDifficultyBucketLabel(dropLabel)} puzzles.`,
+      highlightLabel: dropLabel,
+    };
+  }
+
+  const weakest = bucketsWithData.reduce((min, bucket) =>
+    bucket.accuracyPercentage < min.accuracyPercentage ? bucket : min,
+  );
+  if (weakest.accuracyPercentage < 70) {
+    return {
+      message: `You start struggling around ${formatDifficultyBucketLabel(weakest.label)} puzzles.`,
+      highlightLabel: weakest.label,
+    };
+  }
+
+  return {
+    message: 'Performance is currently steady across your solved difficulty range.',
+    highlightLabel: null,
+  };
 }
 
 function buildEvenlySpacedLabels(labels: string[], maxLabels: number): string[] {
@@ -1054,6 +1204,18 @@ function buildPuzzleRatingProgressionData(
 }
 
 function resolveSubmissionElo(submission: PuzzleSubmissionRecord): number {
+  if (
+    typeof submission.difficultyRating === 'number' &&
+    Number.isFinite(submission.difficultyRating)
+  ) {
+    return submission.difficultyRating;
+  }
+  if (
+    typeof submission.estimatedDifficultyRating === 'number' &&
+    Number.isFinite(submission.estimatedDifficultyRating)
+  ) {
+    return submission.estimatedDifficultyRating;
+  }
   if (typeof submission.puzzleElo === 'number' && Number.isFinite(submission.puzzleElo)) {
     return submission.puzzleElo;
   }
@@ -1548,6 +1710,121 @@ function SolveTimeVsDifficultyChart({
             {data.totalSolvedCount === 1 ? '' : 's'} with timing data.
           </p>
         </div>
+      )}
+    </article>
+  );
+}
+
+function AccuracyByDifficultyCard({
+  analytics,
+  loading,
+  error,
+  sectionStyle,
+  onCollapse,
+}: {
+  analytics: DifficultyBucketAnalyticsData | null;
+  loading: boolean;
+  error: string | null;
+  sectionStyle?: React.CSSProperties;
+  onCollapse?: () => void;
+}) {
+  const { message, highlightLabel } = useMemo(
+    () => resolveDifficultyInsight(analytics),
+    [analytics],
+  );
+  const buckets = analytics?.difficultyBuckets ?? [];
+  const maxAttempts = Math.max(1, ...buckets.map((bucket) => bucket.totalAttempts));
+
+  return (
+    <article
+      className="neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between"
+      style={sectionStyle}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">Analytics</p>
+          <h3 className="mt-1 text-base font-semibold text-slate-700">Accuracy by Difficulty</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Correct first-move rate by puzzle difficulty bucket.
+          </p>
+        </div>
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            className="rounded-full neumo-pill px-3 py-1 text-xs font-semibold text-slate-600 inline-flex items-center gap-1.5 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+            style={sectionStyle}
+            aria-label="Collapse accuracy by difficulty section"
+          >
+            <ChevronUp className="h-3.5 w-3.5" />
+            Collapse
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <p className="mt-3 text-xs text-slate-400">Loading difficulty analytics…</p>
+      ) : error ? (
+        <p className="mt-3 text-xs text-slate-400">Difficulty analytics are unavailable right now.</p>
+      ) : (
+        <>
+          <div className="mt-3 space-y-2">
+            {buckets.map((bucket) => {
+              const isHighlighted = highlightLabel !== null && highlightLabel === bucket.label;
+              const accuracyWidth = `${clamp(bucket.accuracyPercentage, 0, 100)}%`;
+              const attemptsWidth = `${Math.max(8, (bucket.totalAttempts / maxAttempts) * 100)}%`;
+              return (
+                <div
+                  key={bucket.label}
+                  className={`rounded-xl border px-3 py-2 ${
+                    isHighlighted
+                      ? 'border-amber-300/80 bg-amber-50/60 dark:bg-amber-900/20'
+                      : 'border-slate-200/70 bg-white/25'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="font-medium text-slate-700">
+                      {formatDifficultyBucketLabel(bucket.label)}
+                    </span>
+                    <span className="font-semibold text-slate-700">
+                      {Math.round(bucket.accuracyPercentage)}%
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-2 rounded-full bg-slate-200/70">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-cyan-500/80 to-blue-600/80"
+                      style={{ width: accuracyWidth }}
+                    />
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-slate-500">
+                    <span>
+                      {bucket.correctAttempts}/{bucket.totalAttempts} correct
+                    </span>
+                    <span>
+                      Avg solve:{' '}
+                      {bucket.averageSolveTimeSeconds === null
+                        ? 'N/A'
+                        : formatSolveTimeSeconds(bucket.averageSolveTimeSeconds)}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-1 rounded-full bg-slate-200/45">
+                    <div
+                      className="h-full rounded-full bg-slate-400/55"
+                      style={{ width: attemptsWidth }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-[11px] text-slate-500">{message}</p>
+          {analytics && (
+            <p className="mt-1 text-[10px] text-slate-400">
+              Based on {analytics.totalValidAttempts} valid attempts (confidence threshold{' '}
+              {Math.round(analytics.confidenceThreshold * 100)}%).
+            </p>
+          )}
+        </>
       )}
     </article>
   );
@@ -2304,6 +2581,7 @@ export default function DashboardPage() {
   const [isAnalyticsSectionsOpen, setIsAnalyticsSectionsOpen] = useState(true);
   const [isSolveTimeSectionOpen, setIsSolveTimeSectionOpen] = useState(true);
   const [isRatingProgressionSectionOpen, setIsRatingProgressionSectionOpen] = useState(true);
+  const [isAccuracyByDifficultySectionOpen, setIsAccuracyByDifficultySectionOpen] = useState(true);
   const [isFirstMoveAccuracySectionOpen, setIsFirstMoveAccuracySectionOpen] = useState(true);
   const [isTransitioningToChessApp, setIsTransitioningToChessApp] = useState(false);
   const [showSubmissionHistory, setShowSubmissionHistory] = useState(false);
@@ -2321,9 +2599,19 @@ export default function DashboardPage() {
   });
   const [themeSavedNoticeVisible, setThemeSavedNoticeVisible] = useState(false);
   const [settingsStorageScope, setSettingsStorageScope] = useState<string | null>(null);
+  const [difficultyBucketAnalytics, setDifficultyBucketAnalytics] =
+    useState<DifficultyBucketAnalyticsData | null>(null);
+  const [difficultyBucketAnalyticsLoading, setDifficultyBucketAnalyticsLoading] = useState(false);
+  const [difficultyBucketAnalyticsError, setDifficultyBucketAnalyticsError] = useState<string | null>(
+    null,
+  );
   const themeSavedNoticeTimeoutRef = useRef<number | null>(null);
   const appliedThemeScopeRef = useRef<string | null>(null);
   const isDark = theme === 'dark' || (theme === 'system' && resolvedTheme === 'dark');
+  const backendUrl = useMemo(
+    () => process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://127.0.0.1:8010',
+    [],
+  );
 
   const applyThemeCssVariables = useCallback((accent: string, secondary: string) => {
     document.documentElement.style.setProperty('--chess-app-accent', accent);
@@ -2496,6 +2784,62 @@ export default function DashboardPage() {
       window.removeEventListener(updateEventName, syncSubmissions);
     };
   }, []);
+
+  useEffect(() => {
+    const localAuthUserId = readActiveLocalAuthUser()?.id ?? '';
+    if (!localAuthUserId) {
+      setDifficultyBucketAnalytics(null);
+      setDifficultyBucketAnalyticsError(null);
+      setDifficultyBucketAnalyticsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function loadDifficultyAnalytics() {
+      setDifficultyBucketAnalyticsLoading(true);
+      setDifficultyBucketAnalyticsError(null);
+      try {
+        const response = await fetch(`${backendUrl}/puzzles/analytics/difficulty-buckets`, {
+          method: 'GET',
+          headers: {
+            'X-Local-Auth-User-Id': localAuthUserId,
+          },
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`difficulty analytics fetch failed: ${response.status}`);
+        }
+        const payload = (await response.json()) as unknown;
+        const normalized = normalizeDifficultyBucketAnalyticsPayload(payload);
+        if (cancelled) {
+          return;
+        }
+        setDifficultyBucketAnalytics(normalized);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setDifficultyBucketAnalytics(null);
+        setDifficultyBucketAnalyticsError(
+          error instanceof Error ? error.message : 'failed_to_load_difficulty_analytics',
+        );
+      } finally {
+        if (!cancelled) {
+          setDifficultyBucketAnalyticsLoading(false);
+        }
+      }
+    }
+
+    loadDifficultyAnalytics();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [backendUrl, submissions.length]);
 
   useEffect(() => {
     return () => {
@@ -2698,6 +3042,7 @@ export default function DashboardPage() {
     : undefined;
   const isDashboardView = activeNavLabel === 'Dashboard';
   const isAnalyticsView = activeNavLabel === 'Analytics';
+  const isPuzzleLabView = activeNavLabel === 'Puzzle Lab';
   const isAgentView = activeNavLabel === 'Agent';
   const isSettingsView = activeNavLabel === 'Settings';
   const dashboardContainerStyle = dashboardPanelStyle;
@@ -3249,6 +3594,40 @@ export default function DashboardPage() {
                               </p>
                             </button>
                           )
+                        ) : title === 'Accuracy by Difficulty' ? (
+                          isAccuracyByDifficultySectionOpen ? (
+                            <AccuracyByDifficultyCard
+                              key={title}
+                              analytics={difficultyBucketAnalytics}
+                              loading={difficultyBucketAnalyticsLoading}
+                              error={difficultyBucketAnalyticsError}
+                              sectionStyle={dashboardContainerStyle}
+                              onCollapse={() => setIsAccuracyByDifficultySectionOpen(false)}
+                            />
+                          ) : (
+                            <button
+                              key={title}
+                              type="button"
+                              onClick={() => setIsAccuracyByDifficultySectionOpen(true)}
+                              className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+                              style={dashboardContainerStyle}
+                              aria-expanded={false}
+                              aria-label="Expand accuracy by difficulty section"
+                            >
+                              <div>
+                                <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">
+                                  Analytics
+                                </p>
+                                <h3 className="mt-1 text-base font-semibold text-slate-700">
+                                  Accuracy by Difficulty
+                                </h3>
+                              </div>
+                              <p className="text-xs text-slate-400 inline-flex items-center gap-1.5">
+                                <ChevronDown className="h-3.5 w-3.5" />
+                                Click to expand
+                              </p>
+                            </button>
+                          )
                         ) : title === 'First-Move Accuracy' ? (
                           isFirstMoveAccuracySectionOpen ? (
                             <FirstMoveAccuracyCard
@@ -3376,6 +3755,40 @@ export default function DashboardPage() {
                               </p>
                               <h3 className="mt-1 text-base font-semibold text-slate-700">
                                 Puzzle Rating Progression
+                              </h3>
+                            </div>
+                            <p className="text-xs text-slate-400 inline-flex items-center gap-1.5">
+                              <ChevronDown className="h-3.5 w-3.5" />
+                              Click to expand
+                            </p>
+                          </button>
+                        )
+                      ) : title === 'Accuracy by Difficulty' ? (
+                        isAccuracyByDifficultySectionOpen ? (
+                          <AccuracyByDifficultyCard
+                            key={title}
+                            analytics={difficultyBucketAnalytics}
+                            loading={difficultyBucketAnalyticsLoading}
+                            error={difficultyBucketAnalyticsError}
+                            sectionStyle={dashboardContainerStyle}
+                            onCollapse={() => setIsAccuracyByDifficultySectionOpen(false)}
+                          />
+                        ) : (
+                          <button
+                            key={title}
+                            type="button"
+                            onClick={() => setIsAccuracyByDifficultySectionOpen(true)}
+                            className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
+                            style={dashboardContainerStyle}
+                            aria-expanded={false}
+                            aria-label="Expand accuracy by difficulty section"
+                          >
+                            <div>
+                              <p className="text-[11px] uppercase tracking-[0.08em] text-slate-500">
+                                Analytics
+                              </p>
+                              <h3 className="mt-1 text-base font-semibold text-slate-700">
+                                Accuracy by Difficulty
                               </h3>
                             </div>
                             <p className="text-xs text-slate-400 inline-flex items-center gap-1.5">
@@ -3595,6 +4008,10 @@ export default function DashboardPage() {
               </section>
             )}
 
+            {isPuzzleLabView && (
+              <PuzzleLabPanel panelStyle={dashboardContainerStyle} buttonStyle={dashboardButtonStyle} />
+            )}
+
             {isSettingsView && (
               <SettingsPanel
                 isDark={isDark}
@@ -3638,7 +4055,7 @@ export default function DashboardPage() {
 
             {isAgentView && <AgentPage panelStyle={dashboardContainerStyle} />}
 
-            {!isDashboardView && !isAnalyticsView && !isAgentView && !isSettingsView && (
+            {!isDashboardView && !isAnalyticsView && !isPuzzleLabView && !isAgentView && !isSettingsView && (
               <section
                 className="neumo-surface-soft rounded-[26px] p-5 md:p-7"
                 style={dashboardContainerStyle}
