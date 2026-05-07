@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
-from app.services.board_validate import CandidateBoard
+from app.services.board_position_service import CandidateBoard
 from app.services.mate_solver import MateLine
 
 VALIDATION_BONUS = 1.0

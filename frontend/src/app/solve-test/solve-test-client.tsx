@@ -12,8 +12,10 @@ import {
   FirstMoveAssessmentStatus,
   getPuzzleSubmissionUpdateEventName,
   getUnseenPuzzleSubmissionCount,
+  replacePuzzleSubmissions,
 } from '@/lib/puzzle-submissions';
 import {
+  readActiveLocalAuthUser,
   readScopedStorageValue,
   resolveUserSettingsScope,
   writeScopedStorageValue,
@@ -440,6 +442,49 @@ export default function SolveTestClient() {
     return process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://127.0.0.1:8010';
   }, []);
 
+  useEffect(() => {
+    const localAuthUser = readActiveLocalAuthUser();
+    const localAuthUserId = localAuthUser?.id ?? '';
+    if (!localAuthUserId) {
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function loadStoredSubmissions() {
+      try {
+        const response = await fetch(`${backendUrl}/puzzles/submissions?limit=500`, {
+          method: 'GET',
+          headers: {
+            'X-Local-Auth-User-Id': localAuthUserId,
+          },
+          signal: controller.signal,
+          cache: 'no-store',
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as unknown;
+        if (cancelled || !Array.isArray(payload)) {
+          return;
+        }
+        replacePuzzleSubmissions(payload as any);
+      } catch {
+        // Keep local-only behavior when backend history fetch fails.
+      }
+    }
+
+    loadStoredSubmissions();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [backendUrl]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const chosen = e.target.files?.[0] ?? null;
     setFile(chosen);
@@ -526,8 +571,12 @@ export default function SolveTestClient() {
 
     try {
       const headers: HeadersInit = {};
+      const localAuthUserId = readActiveLocalAuthUser()?.id ?? null;
       if (token) {
         headers.Authorization = `Bearer ${token}`;
+      }
+      if (localAuthUserId) {
+        headers['X-Local-Auth-User-Id'] = localAuthUserId;
       }
 
       const res = await fetch(`${backendUrl}/solve`, {
@@ -610,7 +659,7 @@ export default function SolveTestClient() {
               status: firstMoveClassification.status,
               timeToFirstMoveSeconds: firstMoveAttempt.timeToFirstMoveSeconds,
               puzzleId: createPuzzleId(data.fen, file),
-              userId: user?.sub ?? null,
+              userId: user?.sub ?? localAuthUserId,
               attemptId,
               createdAt: firstMoveAttempt.createdAt,
               isValidForFirstMoveAccuracy,

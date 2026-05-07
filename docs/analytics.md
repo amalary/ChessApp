@@ -18,9 +18,9 @@ Analytics is shown inside the `/dashboard` page and summarizes recent puzzle per
 
 ### Data Sources
 - Data comes from puzzle submissions recorded in browser local storage.
-- No server-side sync is currently documented in this code path.
+- For local-auth users, solve uploads are also persisted server-side in Cloud SQL and can be reloaded into local storage on login.
 
-<!-- REVIEW_NEEDED: Confirm whether analytics data should be persisted server-side in production. -->
+<!-- REVIEW_NEEDED: Confirm whether analytics data should be persisted server-side in production. --> *Tackling now* 
 
 ## How It Works
 ### User Actions
@@ -83,5 +83,5 @@ You should see:
 - Re-check low-confidence solves before drawing conclusions.
 
 ## Planned or Partial Areas
-- **Planned feature — not currently available:** fully implemented "Accuracy by Difficulty" section content.
+- **Planned feature ï¿½ not currently available:** fully implemented "Accuracy by Difficulty" section content.
 - Some analytics subsections currently render scaffold text in the UI.

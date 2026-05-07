@@ -293,3 +293,30 @@ export function addPuzzleSubmission(
   emitUpdateEvent();
   return [];
 }
+
+export function replacePuzzleSubmissions(
+  submissions: PuzzleSubmissionRecord[],
+): PuzzleSubmissionRecord[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  const normalized = submissions
+    .filter(isSubmissionRecord)
+    .sort((a, b) => {
+      const left = Date.parse(a.submittedAt);
+      const right = Date.parse(b.submittedAt);
+      return Number.isFinite(right - left) ? right - left : 0;
+    })
+    .slice(0, MAX_STORED_SUBMISSIONS);
+
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    // Keep local history untouched if storage is unavailable.
+    return readPuzzleSubmissions();
+  }
+
+  emitUpdateEvent();
+  return normalized;
+}

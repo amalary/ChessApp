@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Callable, Literal, TypedDict, cast
 
 import chess
 from langchain_core.runnables import RunnableLambda
@@ -111,6 +111,15 @@ class ChessAssistantAgent:
         self._hint_writer = RunnableLambda(self._build_hint_text)
         self._explain_writer = RunnableLambda(self._build_explanation_text)
         self._followup_writer = RunnableLambda(self._build_followup_text)
+        self._tool_handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
+            "validate_fen": self._tool_validate_fen,
+            "list_legal_moves": self._tool_list_legal_moves,
+            "validate_move": self._tool_validate_move,
+            "get_solver_solution": self._tool_get_solver_solution,
+            "verify_checkmate": self._tool_verify_checkmate,
+            "classify_theme": self._tool_classify_theme,
+            "retrieve_user_puzzle_history": self._tool_retrieve_user_puzzle_history,
+        }
         self.graph = self._build_graph()
 
     def run(
@@ -291,7 +300,7 @@ class ChessAssistantAgent:
         return state
 
     def validate_position(self, state: ChessAssistantState) -> ChessAssistantState:
-        if state.get("response_text"):
+        if self._has_response(state):
             return state
 
         fen = state.get("fen")
@@ -312,7 +321,7 @@ class ChessAssistantAgent:
         }
 
     def analyze_position(self, state: ChessAssistantState) -> ChessAssistantState:
-        if state.get("response_text"):
+        if self._has_response(state):
             return state
 
         if not state.get("fen") or not state.get("board_valid"):
@@ -358,7 +367,7 @@ class ChessAssistantAgent:
         return next_state
 
     def generate_hint(self, state: ChessAssistantState) -> ChessAssistantState:
-        if state.get("response_text"):
+        if self._has_response(state):
             return state
 
         move = state.get("referenced_move") or state.get("solver_move_san")
@@ -385,7 +394,7 @@ class ChessAssistantAgent:
         }
 
     def explain_solution(self, state: ChessAssistantState) -> ChessAssistantState:
-        if state.get("response_text"):
+        if self._has_response(state):
             return state
 
         move = state.get("referenced_move") or state.get("solver_move_san")
@@ -413,7 +422,7 @@ class ChessAssistantAgent:
         }
 
     def identify_theme(self, state: ChessAssistantState) -> ChessAssistantState:
-        if state.get("response_text"):
+        if self._has_response(state):
             return state
 
         if not state.get("fen"):
@@ -445,7 +454,7 @@ class ChessAssistantAgent:
         }
 
     def answer_followup(self, state: ChessAssistantState) -> ChessAssistantState:
-        if state.get("response_text"):
+        if self._has_response(state):
             return state
 
         message = state.get("user_message", "")
@@ -535,7 +544,7 @@ class ChessAssistantAgent:
         return "blocked" if state.get("guardrail_triggered") else "continue"
 
     def _route_mode(self, state: ChessAssistantState) -> str:
-        if state.get("response_text"):
+        if self._has_response(state):
             return "end"
         mode = state.get("requested_mode", "followup")
         if mode in ALLOWED_MODES:
@@ -614,67 +623,70 @@ class ChessAssistantAgent:
             "guardrail_reason": reason,
         }
 
+    def _has_response(self, state: ChessAssistantState) -> bool:
+        return bool(state.get("response_text"))
+
     def _run_tool(self, tool_name: str, **kwargs: Any) -> Any:
         if tool_name not in ALLOWED_TOOLS:
             raise ToolAccessError(tool_name=tool_name)
+        handler = self._tool_handlers.get(tool_name)
+        if handler is None:
+            raise ToolAccessError(tool_name=tool_name)
+        return handler(kwargs)
 
-        if tool_name == "validate_fen":
-            fen = kwargs["fen"]
+    def _tool_validate_fen(self, payload: dict[str, Any]) -> dict[str, Any]:
+        fen = payload["fen"]
+        try:
+            board = chess.Board(fen)
+        except Exception:
+            return {"valid": False, "board": None}
+        return {"valid": board.is_valid(), "board": board}
+
+    def _tool_list_legal_moves(self, payload: dict[str, Any]) -> list[str]:
+        board = chess.Board(payload["fen"])
+        return [board.san(move) for move in board.legal_moves]
+
+    def _tool_validate_move(self, payload: dict[str, Any]) -> dict[str, bool]:
+        board = chess.Board(payload["fen"])
+        move_san = payload["move_san"]
+        try:
+            board.parse_san(move_san)
+            return {"valid": True}
+        except Exception:
+            return {"valid": False}
+
+    def _tool_get_solver_solution(self, payload: dict[str, Any]) -> dict[str, Any]:
+        solver_move_san = payload.get("solver_move_san")
+        solver_line = [m for m in payload.get("solver_line", []) if isinstance(m, str) and m]
+        return {
+            "solver_move_san": solver_move_san if isinstance(solver_move_san, str) and solver_move_san else None,
+            "solver_line": solver_line,
+        }
+
+    def _tool_verify_checkmate(self, payload: dict[str, Any]) -> dict[str, bool]:
+        board = chess.Board(payload["fen"])
+        solver_line = payload.get("solver_line", [])
+        for san in solver_line:
             try:
-                board = chess.Board(fen)
+                move = board.parse_san(san)
             except Exception:
-                return {"valid": False, "board": None}
-            return {"valid": board.is_valid(), "board": board}
+                return {"line_valid": False, "checkmate_verified": False}
+            board.push(move)
+        return {
+            "line_valid": True,
+            "checkmate_verified": board.is_checkmate(),
+        }
 
-        if tool_name == "list_legal_moves":
-            board = chess.Board(kwargs["fen"])
-            return [board.san(move) for move in board.legal_moves]
+    def _tool_classify_theme(self, payload: dict[str, Any]) -> list[str]:
+        return self._classify_theme_from_position(
+            fen=payload["fen"],
+            solver_move_san=payload.get("solver_move_san"),
+            solver_line=payload.get("solver_line", []),
+        )
 
-        if tool_name == "validate_move":
-            board = chess.Board(kwargs["fen"])
-            move_san = kwargs["move_san"]
-            try:
-                board.parse_san(move_san)
-                return {"valid": True}
-            except Exception:
-                return {"valid": False}
-
-        if tool_name == "get_solver_solution":
-            solver_move_san = kwargs.get("solver_move_san")
-            solver_line = [m for m in kwargs.get("solver_line", []) if isinstance(m, str) and m]
-            return {
-                "solver_move_san": solver_move_san if isinstance(solver_move_san, str) and solver_move_san else None,
-                "solver_line": solver_line,
-            }
-
-        if tool_name == "verify_checkmate":
-            board = chess.Board(kwargs["fen"])
-            solver_line = kwargs.get("solver_line", [])
-            for san in solver_line:
-                try:
-                    move = board.parse_san(san)
-                except Exception:
-                    return {"line_valid": False, "checkmate_verified": False}
-                board.push(move)
-            return {
-                "line_valid": True,
-                "checkmate_verified": board.is_checkmate(),
-            }
-
-        if tool_name == "classify_theme":
-            fen = kwargs["fen"]
-            solver_move_san = kwargs.get("solver_move_san")
-            solver_line = kwargs.get("solver_line", [])
-            return self._classify_theme_from_position(
-                fen=fen,
-                solver_move_san=solver_move_san,
-                solver_line=solver_line,
-            )
-
-        if tool_name == "retrieve_user_puzzle_history":
-            return []
-
-        raise ToolAccessError(tool_name=tool_name)
+    def _tool_retrieve_user_puzzle_history(self, payload: dict[str, Any]) -> list[Any]:
+        _ = payload
+        return []
 
     def _classify_theme_from_position(
         self,

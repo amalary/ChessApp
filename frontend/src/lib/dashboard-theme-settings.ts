@@ -41,6 +41,28 @@ function readActiveLocalAuthUserUnsafe(): LocalAuthActiveUser | null {
   }
 }
 
+export function readActiveLocalAuthUser(): {
+  id: string | null;
+  username: string | null;
+  email: string | null;
+} | null {
+  const raw = readActiveLocalAuthUserUnsafe();
+  if (!raw) {
+    return null;
+  }
+
+  const id = typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : null;
+  const username =
+    typeof raw.username === 'string' && raw.username.trim() ? raw.username.trim() : null;
+  const email = typeof raw.email === 'string' && raw.email.trim() ? raw.email.trim() : null;
+
+  if (!id && !username && !email) {
+    return null;
+  }
+
+  return { id, username, email };
+}
+
 export function writeActiveLocalAuthUser(user: {
   id?: string | null;
   username?: string | null;

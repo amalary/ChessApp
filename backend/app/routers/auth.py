@@ -13,6 +13,15 @@ from app.security import hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+SIGNUP_DB_UNAVAILABLE_DETAIL = (
+    "Database unavailable for signup. Verify DB_USER/DB_PASSWORD/DB_NAME "
+    "or DATABASE_URL and ensure Cloud SQL proxy is running."
+)
+LOGIN_DB_UNAVAILABLE_DETAIL = (
+    "Database unavailable for login. Verify DB_USER/DB_PASSWORD/DB_NAME "
+    "or DATABASE_URL and ensure Cloud SQL proxy is running."
+)
+
 
 class SignupRequest(BaseModel):
     username: str
@@ -88,17 +97,42 @@ class AuthResponse(BaseModel):
     user: UserView
 
 
+def _to_user_view(user: LocalAuthUser) -> UserView:
+    return UserView(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        created_at=user.created_at,
+    )
+
+
+def _find_existing_user_for_signup(db: Session, payload: SignupRequest) -> LocalAuthUser | None:
+    return db.execute(
+        select(LocalAuthUser).where(
+            or_(
+                func.lower(LocalAuthUser.username) == payload.username.lower(),
+                func.lower(LocalAuthUser.email) == payload.email.lower(),
+            )
+        )
+    ).scalar_one_or_none()
+
+
+def _find_user_for_login(db: Session, payload: LoginRequest) -> LocalAuthUser | None:
+    return db.execute(
+        select(LocalAuthUser).where(
+            func.lower(LocalAuthUser.username) == payload.username.lower()
+        )
+    ).scalar_one_or_none()
+
+
+def _raise_db_unavailable(detail: str) -> None:
+    raise HTTPException(status_code=503, detail=detail)
+
+
 @router.post("/signup", response_model=AuthResponse, status_code=201)
 def signup(payload: SignupRequest, db: Session = Depends(get_db)):
     try:
-        existing_user = db.execute(
-            select(LocalAuthUser).where(
-                or_(
-                    func.lower(LocalAuthUser.username) == payload.username.lower(),
-                    func.lower(LocalAuthUser.email) == payload.email.lower(),
-                )
-            )
-        ).scalar_one_or_none()
+        existing_user = _find_existing_user_for_signup(db, payload)
         if existing_user is not None:
             raise HTTPException(
                 status_code=409, detail="Username or email is already registered."
@@ -115,52 +149,26 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
 
         return AuthResponse(
             message="Signup successful.",
-            user=UserView(
-                id=new_user.id,
-                username=new_user.username,
-                email=new_user.email,
-                created_at=new_user.created_at,
-            ),
+            user=_to_user_view(new_user),
         )
     except HTTPException:
         raise
     except SQLAlchemyError:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Database unavailable for signup. Verify DB_USER/DB_PASSWORD/DB_NAME "
-                "or DATABASE_URL and ensure Cloud SQL proxy is running."
-            ),
-        )
+        _raise_db_unavailable(SIGNUP_DB_UNAVAILABLE_DETAIL)
 
 
 @router.post("/login", response_model=AuthResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     try:
-        user = db.execute(
-            select(LocalAuthUser).where(
-                func.lower(LocalAuthUser.username) == payload.username.lower()
-            )
-        ).scalar_one_or_none()
+        user = _find_user_for_login(db, payload)
         if user is None or not verify_password(payload.password, user.password_hash):
             raise HTTPException(status_code=401, detail="Invalid username or password.")
 
         return AuthResponse(
             message="Login successful.",
-            user=UserView(
-                id=user.id,
-                username=user.username,
-                email=user.email,
-                created_at=user.created_at,
-            ),
+            user=_to_user_view(user),
         )
     except HTTPException:
         raise
     except SQLAlchemyError:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Database unavailable for login. Verify DB_USER/DB_PASSWORD/DB_NAME "
-                "or DATABASE_URL and ensure Cloud SQL proxy is running."
-            ),
-        )
+        _raise_db_unavailable(LOGIN_DB_UNAVAILABLE_DETAIL)

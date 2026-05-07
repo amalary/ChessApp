@@ -1,0 +1,5 @@
+2026/05/06 17:15:22 Authorizing with the credentials file at "C:\\Users\\admin\\Desktop\\ChessApp_2\\ChessApp\\keys\\sa.json"
+2026/05/06 17:15:22 [chessapp-477519:us-west2:chess-app-project] Listening on 127.0.0.1:5432
+2026/05/06 17:15:22 The proxy has started successfully and is ready for new connections!
+2026/05/06 17:15:23 [chessapp-477519:us-west2:chess-app-project] Accepted connection from 127.0.0.1:52373
+2026/05/06 17:15:23 [chessapp-477519:us-west2:chess-app-project] client closed the connection

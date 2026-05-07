@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 from app.services.board_detect import detect_and_normalize_board
+from app.services.board_position_service import build_candidates
 from app.services.board_preprocess import preprocess_image_bytes
 from app.services.board_transcription import transcribe_board_from_squares
-from app.services.board_validate import build_candidates
 from app.services.candidate_ranker import rank_candidates
 from app.services.gemini_assist import extract_puzzle_hints
 from app.services.mate_solver import EngineCrashedError, MateLine, find_mate_in_1_to_3
@@ -28,6 +28,14 @@ class SolvePipelineResult:
     engine_path: Optional[str]
     engine_errors: List[str]
     candidates_debug: list[dict]
+
+
+@dataclass(frozen=True)
+class EngineConfig:
+    think_time_s: float
+    max_depth: int
+    max_mate: int
+    engine_paths: list[str]
 
 
 def _env_int(name: str, default: int) -> int:
@@ -128,6 +136,107 @@ def _make_transcription_payload(
     }
 
 
+def _validate_expected_mate_in(expected_mate_in: int | None) -> None:
+    if expected_mate_in is not None and expected_mate_in not in {1, 2, 3}:
+        raise ValueError("expected_mate_in must be 1, 2, or 3.")
+
+
+def _resolve_side_options(expected_side_to_move: str, side_hint: str) -> list[str]:
+    requested_side = expected_side_to_move if expected_side_to_move in {"white", "black"} else "white"
+    side_options = [requested_side]
+    if side_hint in {"white", "black"} and side_hint not in side_options:
+        side_options.append(side_hint)
+    fallback_side = "black" if requested_side == "white" else "white"
+    if fallback_side not in side_options:
+        side_options.append(fallback_side)
+    return side_options
+
+
+def _select_valid_candidates(transcribed: object, side_options: list[str]) -> list[object]:
+    candidates = build_candidates(
+        board_map=transcribed.board_map,
+        side_options=side_options,
+        base_confidence=transcribed.confidence,
+        uncertain_squares=transcribed.uncertain_squares,
+    )
+    valid_candidates = [candidate for candidate in candidates if candidate.validation.passed]
+    if valid_candidates:
+        return valid_candidates
+    raise ValueError(
+        "No valid candidate positions after transcription, validation, and repair."
+    )
+
+
+def _resolve_engine_config() -> EngineConfig:
+    return EngineConfig(
+        think_time_s=max(0.5, _env_float("MATE_THINK_TIME_S", 3.0)),
+        max_depth=max(10, _env_int("MATE_MAX_DEPTH", 26)),
+        max_mate=min(3, max(1, _env_int("MATE_MAX_MOVES", 3))),
+        engine_paths=_existing_paths(_candidate_stockfish_paths()),
+    )
+
+
+def _solve_candidates(
+    valid_candidates: list[object],
+    engine_config: EngineConfig,
+) -> tuple[dict[str, Optional[MateLine]], str, Optional[str], list[str]]:
+    mate_by_fen: dict[str, Optional[MateLine]] = {}
+    engine_mode = "stockfish"
+    engine_path = None
+    engine_errors: list[str] = []
+    for candidate in valid_candidates:
+        line, mode, used_path, errs = _solve_with_stockfish(
+            fen=candidate.fen,
+            think_time_s=engine_config.think_time_s,
+            max_depth=engine_config.max_depth,
+            max_mate=engine_config.max_mate,
+            engine_paths=engine_config.engine_paths,
+        )
+        mate_by_fen[candidate.fen] = line
+        engine_mode = mode
+        engine_path = used_path
+        engine_errors.extend(errs)
+    return mate_by_fen, engine_mode, engine_path, engine_errors
+
+
+def _validate_chosen_mate_in(
+    *,
+    expected_mate_in: int | None,
+    chosen_mate_line: Optional[MateLine],
+) -> None:
+    if expected_mate_in is None:
+        return
+    if chosen_mate_line is None:
+        raise ValueError(
+            f"Expected mate in {expected_mate_in}, but no forced mate found."
+        )
+    if chosen_mate_line.mate_in != expected_mate_in:
+        raise ValueError(
+            f"Expected mate in {expected_mate_in}, but found mate in {chosen_mate_line.mate_in}."
+        )
+
+
+def _build_candidates_debug(
+    valid_candidates: list[object],
+    mate_by_fen: dict[str, Optional[MateLine]],
+) -> list[dict]:
+    return [
+        {
+            "fen": candidate.fen,
+            "source": candidate.source,
+            "validation_passed": candidate.validation.passed,
+            "validation_reasons": candidate.validation.reasons,
+            "repair_applied": candidate.repair_applied,
+            "transcription_confidence": candidate.confidence,
+            "mate_found": mate_by_fen.get(candidate.fen) is not None,
+            "mate_in": (
+                mate_by_fen[candidate.fen].mate_in if mate_by_fen.get(candidate.fen) else None
+            ),
+        }
+        for candidate in valid_candidates
+    ]
+
+
 def run_solve_pipeline(
     image_bytes: bytes,
     filename: str | None,
@@ -135,8 +244,7 @@ def run_solve_pipeline(
     board_perspective: str | None,
     expected_mate_in: int | None = None,
 ) -> SolvePipelineResult:
-    if expected_mate_in is not None and expected_mate_in not in {1, 2, 3}:
-        raise ValueError("expected_mate_in must be 1, 2, or 3.")
+    _validate_expected_mate_in(expected_mate_in)
 
     # 1) image preprocessing
     pre = preprocess_image_bytes(image_bytes)
@@ -153,53 +261,17 @@ def run_solve_pipeline(
     # 5) optional Gemini helper for puzzle text hints only
     hint = extract_puzzle_hints(image_bytes=image_bytes, filename=filename)
     side_hint = hint.get("side_to_move", "unknown")
-    requested_side = (
-        expected_side_to_move
-        if expected_side_to_move in {"white", "black"}
-        else "white"
-    )
-    side_options = [requested_side]
-    if side_hint in {"white", "black"} and side_hint not in side_options:
-        side_options.append(side_hint)
-    fallback_side = "black" if requested_side == "white" else "white"
-    if fallback_side not in side_options:
-        side_options.append(fallback_side)
+    side_options = _resolve_side_options(expected_side_to_move, side_hint)
 
     # 6) candidate generation + validation/repair
-    candidates = build_candidates(
-        board_map=transcribed.board_map,
-        side_options=side_options,
-        base_confidence=transcribed.confidence,
-        uncertain_squares=transcribed.uncertain_squares,
-    )
-    valid_candidates = [c for c in candidates if c.validation.passed]
-    if not valid_candidates:
-        raise ValueError(
-            "No valid candidate positions after transcription, validation, and repair."
-        )
+    valid_candidates = _select_valid_candidates(transcribed, side_options)
 
     # 7) solve with Stockfish only (mate in 1..3)
-    think_time_s = max(0.5, _env_float("MATE_THINK_TIME_S", 3.0))
-    max_depth = max(10, _env_int("MATE_MAX_DEPTH", 26))
-    max_mate = min(3, max(1, _env_int("MATE_MAX_MOVES", 3)))
-    engine_paths = _existing_paths(_candidate_stockfish_paths())
-
-    mate_by_fen: dict[str, Optional[MateLine]] = {}
-    engine_mode = "stockfish"
-    engine_path = None
-    engine_errors: list[str] = []
-    for candidate in valid_candidates:
-        line, mode, used_path, errs = _solve_with_stockfish(
-            fen=candidate.fen,
-            think_time_s=think_time_s,
-            max_depth=max_depth,
-            max_mate=max_mate,
-            engine_paths=engine_paths,
-        )
-        mate_by_fen[candidate.fen] = line
-        engine_mode = mode
-        engine_path = used_path
-        engine_errors.extend(errs)
+    engine_config = _resolve_engine_config()
+    mate_by_fen, engine_mode, engine_path, engine_errors = _solve_candidates(
+        valid_candidates=valid_candidates,
+        engine_config=engine_config,
+    )
 
     # 8) rank candidates
     ranked = rank_candidates(
@@ -207,15 +279,10 @@ def run_solve_pipeline(
     )
     chosen = ranked[0]
 
-    if expected_mate_in is not None:
-        if chosen.mate_line is None:
-            raise ValueError(
-                f"Expected mate in {expected_mate_in}, but no forced mate found."
-            )
-        if chosen.mate_line.mate_in != expected_mate_in:
-            raise ValueError(
-                f"Expected mate in {expected_mate_in}, but found mate in {chosen.mate_line.mate_in}."
-            )
+    _validate_chosen_mate_in(
+        expected_mate_in=expected_mate_in,
+        chosen_mate_line=chosen.mate_line,
+    )
 
     transcription = _make_transcription_payload(
         board_map=transcribed.board_map,
@@ -238,19 +305,5 @@ def run_solve_pipeline(
         engine_mode=engine_mode,
         engine_path=engine_path,
         engine_errors=engine_errors,
-        candidates_debug=[
-            {
-                "fen": c.fen,
-                "source": c.source,
-                "validation_passed": c.validation.passed,
-                "validation_reasons": c.validation.reasons,
-                "repair_applied": c.repair_applied,
-                "transcription_confidence": c.confidence,
-                "mate_found": mate_by_fen.get(c.fen) is not None,
-                "mate_in": (
-                    mate_by_fen[c.fen].mate_in if mate_by_fen.get(c.fen) else None
-                ),
-            }
-            for c in valid_candidates
-        ],
+        candidates_debug=_build_candidates_debug(valid_candidates, mate_by_fen),
     )

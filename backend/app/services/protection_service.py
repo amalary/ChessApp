@@ -10,6 +10,7 @@ from fastapi import File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 
+from app.api.errors import error_response
 from app.auth0 import get_optional_current_user
 from app.utils.redis_controls import (
     acquire_lock,
@@ -60,6 +61,14 @@ class RateLimitViolation(Exception):
         self.retry_after = retry_after
 
 
+@dataclass(slots=True, frozen=True)
+class FixedWindowRule:
+    key: str
+    limit: int
+    window_seconds: int
+    reason: str
+
+
 @dataclass(slots=True)
 class RequestActor:
     user_id: str | None
@@ -108,9 +117,10 @@ def rate_limited_response(message: str = RATE_LIMIT_MESSAGE, retry_after: int | 
     headers = {}
     if retry_after is not None and retry_after > 0:
         headers["Retry-After"] = str(retry_after)
-    return JSONResponse(
+    return error_response(
         status_code=429,
-        content={"error": RATE_LIMIT_ERROR, "message": message},
+        code=RATE_LIMIT_ERROR,
+        message=message,
         headers=headers,
     )
 
@@ -121,6 +131,17 @@ def request_actor(request: Request) -> RequestActor:
     if not ip:
         ip = "127.0.0.1"
     return RequestActor(user_id=user_id, ip=ip)
+
+
+def _require_redis_client(request: Request) -> Redis:
+    redis_client = getattr(request.app.state, "redis_client", None)
+    if redis_client is None:
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
+    return redis_client
+
+
+def _optional_redis_client(request: Request) -> Redis | None:
+    return getattr(request.app.state, "redis_client", None)
 
 
 def _is_health_check(path: str) -> bool:
@@ -160,76 +181,92 @@ async def enforce_global_limits(request: Request, redis_client: Redis) -> JSONRe
 
     actor = request_actor(request)
 
-    ip_key = f"rate_limit:ip:{actor.ip}:global"
-    ip_decision = await fixed_window_limit(
+    ip_response = await _enforce_fixed_window_rule(
+        request=request,
+        actor=actor,
         redis_client=redis_client,
-        key=ip_key,
-        limit=GLOBAL_IP_LIMIT,
-        window_seconds=GLOBAL_WINDOW_SECONDS,
-    )
-    if not ip_decision.allowed:
-        _log_block(
+        rule=FixedWindowRule(
+            key=f"rate_limit:ip:{actor.ip}:global",
+            limit=GLOBAL_IP_LIMIT,
+            window_seconds=GLOBAL_WINDOW_SECONDS,
             reason="global_ip_rate_limit",
-            request=request,
-            actor=actor,
-            extra=f"count={ip_decision.current_count} limit={ip_decision.limit}",
-        )
-        return rate_limited_response(retry_after=ip_decision.retry_after_seconds)
+        ),
+    )
+    if ip_response is not None:
+        return ip_response
 
     if actor.user_id:
-        user_key = f"rate_limit:user:{actor.user_id}:global"
-        user_decision = await fixed_window_limit(
+        user_response = await _enforce_fixed_window_rule(
+            request=request,
+            actor=actor,
             redis_client=redis_client,
-            key=user_key,
-            limit=GLOBAL_USER_LIMIT,
-            window_seconds=GLOBAL_WINDOW_SECONDS,
-        )
-        if not user_decision.allowed:
-            _log_block(
+            rule=FixedWindowRule(
+                key=f"rate_limit:user:{actor.user_id}:global",
+                limit=GLOBAL_USER_LIMIT,
+                window_seconds=GLOBAL_WINDOW_SECONDS,
                 reason="global_user_rate_limit",
-                request=request,
-                actor=actor,
-                extra=f"count={user_decision.current_count} limit={user_decision.limit}",
-            )
-            return rate_limited_response(retry_after=user_decision.retry_after_seconds)
+            ),
+        )
+        if user_response is not None:
+            return user_response
 
     if _is_sensitive_path(path):
         sensitive_id = actor.user_id or actor.ip
         sensitive_kind = "user" if actor.user_id else "ip"
-        sensitive_key = f"rate_limit:{sensitive_kind}:{sensitive_id}:sensitive"
-        sensitive_decision = await fixed_window_limit(
+        sensitive_response = await _enforce_fixed_window_rule(
+            request=request,
+            actor=actor,
             redis_client=redis_client,
-            key=sensitive_key,
-            limit=SENSITIVE_LIMIT,
-            window_seconds=SENSITIVE_WINDOW_SECONDS,
-        )
-        if not sensitive_decision.allowed:
-            _log_block(
+            rule=FixedWindowRule(
+                key=f"rate_limit:{sensitive_kind}:{sensitive_id}:sensitive",
+                limit=SENSITIVE_LIMIT,
+                window_seconds=SENSITIVE_WINDOW_SECONDS,
                 reason="sensitive_rate_limit",
-                request=request,
-                actor=actor,
-                extra=f"count={sensitive_decision.current_count} limit={sensitive_decision.limit}",
-            )
-            return rate_limited_response(retry_after=sensitive_decision.retry_after_seconds)
+            ),
+        )
+        if sensitive_response is not None:
+            return sensitive_response
 
     if _is_analytics_path(path) and actor.user_id:
-        analytics_key = f"rate_limit:user:{actor.user_id}:analytics"
-        analytics_decision = await fixed_window_limit(
+        analytics_response = await _enforce_fixed_window_rule(
+            request=request,
+            actor=actor,
             redis_client=redis_client,
-            key=analytics_key,
-            limit=ANALYTICS_LIMIT,
-            window_seconds=ANALYTICS_WINDOW_SECONDS,
-        )
-        if not analytics_decision.allowed:
-            _log_block(
+            rule=FixedWindowRule(
+                key=f"rate_limit:user:{actor.user_id}:analytics",
+                limit=ANALYTICS_LIMIT,
+                window_seconds=ANALYTICS_WINDOW_SECONDS,
                 reason="analytics_rate_limit",
-                request=request,
-                actor=actor,
-                extra=f"count={analytics_decision.current_count} limit={analytics_decision.limit}",
-            )
-            return rate_limited_response(retry_after=analytics_decision.retry_after_seconds)
+            ),
+        )
+        if analytics_response is not None:
+            return analytics_response
 
     return None
+
+
+async def _enforce_fixed_window_rule(
+    *,
+    request: Request,
+    actor: RequestActor,
+    redis_client: Redis,
+    rule: FixedWindowRule,
+) -> JSONResponse | None:
+    decision = await fixed_window_limit(
+        redis_client=redis_client,
+        key=rule.key,
+        limit=rule.limit,
+        window_seconds=rule.window_seconds,
+    )
+    if decision.allowed:
+        return None
+    _log_block(
+        reason=rule.reason,
+        request=request,
+        actor=actor,
+        extra=f"count={decision.current_count} limit={decision.limit}",
+    )
+    return rate_limited_response(retry_after=decision.retry_after_seconds)
 
 
 def _failure_counter_key(actor: RequestActor) -> str:
@@ -245,9 +282,7 @@ def _failure_block_key(actor: RequestActor) -> str:
 
 
 async def ensure_not_failure_blocked(request: Request) -> None:
-    redis_client = getattr(request.app.state, "redis_client", None)
-    if redis_client is None:
-        raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
+    redis_client = _require_redis_client(request)
 
     actor = request_actor(request)
     blocked = await redis_client.ttl(_failure_block_key(actor))
@@ -262,7 +297,7 @@ async def ensure_not_failure_blocked(request: Request) -> None:
 
 
 async def record_failed_solve_attempt(request: Request) -> None:
-    redis_client = getattr(request.app.state, "redis_client", None)
+    redis_client = _optional_redis_client(request)
     if redis_client is None:
         return
 
@@ -287,7 +322,7 @@ async def record_failed_solve_attempt(request: Request) -> None:
 
 
 async def clear_failed_solve_attempts(request: Request) -> None:
-    redis_client = getattr(request.app.state, "redis_client", None)
+    redis_client = _optional_redis_client(request)
     if redis_client is None:
         return
     actor = request_actor(request)
@@ -329,9 +364,7 @@ class EngineLock:
 
 
 async def enforce_engine_lock(request: Request) -> AsyncGenerator[None, None]:
-    redis_client = getattr(request.app.state, "redis_client", None)
-    if redis_client is None:
-        raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
+    redis_client = _require_redis_client(request)
     actor = request_actor(request)
     lock = EngineLock(redis_client=redis_client, actor=actor)
     await lock.acquire(request)
@@ -345,7 +378,7 @@ async def get_cached_analytics_response(request: Request) -> dict | list | None:
     actor = request_actor(request)
     if not actor.user_id:
         return None
-    redis_client = getattr(request.app.state, "redis_client", None)
+    redis_client = _optional_redis_client(request)
     if redis_client is None:
         return None
     return await cache_get_json(redis_client, f"analytics:{actor.user_id}")
@@ -359,7 +392,7 @@ async def set_cached_analytics_response(
     actor = request_actor(request)
     if not actor.user_id:
         return
-    redis_client = getattr(request.app.state, "redis_client", None)
+    redis_client = _optional_redis_client(request)
     if redis_client is None:
         return
     await cache_set_json(

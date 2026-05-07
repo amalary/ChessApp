@@ -19,12 +19,14 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Ensure the project root is importable when running from backend/.
+# Ensure backend package paths are importable when running Alembic from backend/.
+backend_root = Path(__file__).resolve().parents[1]
 project_root = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(backend_root))
+sys.path.insert(1, str(project_root))
 
-from ChessApp.app.db.base import Base  # noqa: E402
-from ChessApp.app.db import models  # noqa: F401,E402
+from app.models_auth import Base  # noqa: E402
+from app import models_puzzle  # noqa: F401,E402
 
 target_metadata = Base.metadata
 
