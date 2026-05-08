@@ -16,6 +16,7 @@ import {
   replacePuzzleSubmissions,
 } from '@/lib/puzzle-submissions';
 import {
+  LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT,
   readActiveLocalAuthUser,
   readScopedStorageValue,
   resolveUserSettingsScope,
@@ -290,9 +291,11 @@ export default function SolveTestClient() {
     syncSettingsScope();
     window.addEventListener('storage', syncSettingsScope);
     window.addEventListener('focus', syncSettingsScope);
+    window.addEventListener(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT, syncSettingsScope);
     return () => {
       window.removeEventListener('storage', syncSettingsScope);
       window.removeEventListener('focus', syncSettingsScope);
+      window.removeEventListener(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT, syncSettingsScope);
     };
   }, [user?.sub]);
 

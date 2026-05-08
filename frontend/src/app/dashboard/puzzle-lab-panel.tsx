@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import {
-  Bot,
   Brain,
   ChevronDown,
   ChevronUp,
@@ -45,6 +44,7 @@ import {
 type PuzzleLabPanelProps = {
   panelStyle?: React.CSSProperties;
   buttonStyle?: React.CSSProperties;
+  isDark?: boolean;
 };
 
 type SideToMove = 'white' | 'black';
@@ -166,7 +166,7 @@ const STAGE_TEXT = [
   'Extracting board geometry',
   'Transcribing FEN with vision model',
   'Running tactical engine search',
-  'Building Puzzle DNA',
+  'Profiling tactical motifs',
   'Generating AI breakdown',
 ] as const;
 const SOLUTION_COLORS = ['#38bdf8', '#14b8a6', '#22c55e', '#f59e0b', '#f97316'] as const;
@@ -840,7 +840,7 @@ function FenBoard({
 
   return (
     <div className={`relative ${className ?? ''}`}>
-      <div className="grid grid-cols-8 rounded-2xl overflow-hidden border border-slate-200/70 dark:border-slate-700/80 shadow-[inset_0_0_0_1px_rgba(15,23,42,0.08)]">
+      <div className="grid grid-cols-8 grid-rows-8 gap-0 rounded-2xl overflow-hidden border border-slate-200/70 dark:border-slate-700/80 shadow-[inset_0_0_0_1px_rgba(15,23,42,0.08)]">
         {orderedRows.map((row, displayRow) =>
           row.map((piece, displayCol) => {
             const sourceRow = flipped ? 7 - displayRow : displayRow;
@@ -855,7 +855,7 @@ function FenBoard({
                 key={square}
                 type="button"
                 onClick={onSquareClick ? () => onSquareClick(square) : undefined}
-                className={`relative h-11 sm:h-12 md:h-13 flex items-center justify-center text-[24px] sm:text-[27px] transition-colors ${
+                className={`relative m-0 aspect-square w-full appearance-none border-0 p-0 leading-none flex items-center justify-center text-[20px] sm:text-[23px] md:text-[26px] transition-colors ${
                   darkSquare
                     ? 'bg-[rgba(122,148,191,0.35)] dark:bg-[rgba(51,65,85,0.65)]'
                     : 'bg-[rgba(248,250,252,0.9)] dark:bg-[rgba(15,23,42,0.72)]'
@@ -884,7 +884,7 @@ function FenBoard({
       </div>
 
       {arrows && arrows.length > 0 && (
-        <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 8 8" preserveAspectRatio="none">
+        <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 8 8" preserveAspectRatio="xMidYMid meet">
           <defs>
             <marker id="puzzle-lab-arrowhead" markerWidth="6" markerHeight="6" refX="4" refY="2.5" orient="auto">
               <path d="M0,0 L5,2.5 L0,5 z" fill="#38bdf8" />
@@ -980,7 +980,7 @@ function DnaRadar({ dna }: { dna: PuzzleDna }) {
   );
 }
 
-export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps) {
+export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: PuzzleLabPanelProps) {
   const backendUrl = useMemo(() => process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://127.0.0.1:8010', []);
 
   const [file, setFile] = useState<File | null>(null);
@@ -1841,16 +1841,33 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
   };
 
   const breakdownSections = analysis ? buildBreakdownSections(analysis) : [];
+  const showArchivedPuzzleLabSections = false;
+  const primaryTextStyle: React.CSSProperties = {
+    color: isDark ? 'rgb(226, 232, 240)' : 'rgb(51, 65, 85)',
+  };
+  const secondaryTextStyle: React.CSSProperties = {
+    color: isDark ? 'rgb(203, 213, 225)' : 'rgb(71, 85, 105)',
+  };
+  const tertiaryTextStyle: React.CSSProperties = {
+    color: isDark ? 'rgb(186, 200, 217)' : 'rgb(100, 116, 139)',
+  };
 
   return (
-    <section className="space-y-5">
+    <section className="puzzle-lab-contrast space-y-5">
       <header className="neumo-surface-soft rounded-[28px] p-5 md:p-6" style={panelStyle}>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.14em] text-slate-500">AI-first tactical workstation</p>
-            <h2 className="mt-1 text-3xl font-semibold tracking-tight text-slate-700">Puzzle Lab</h2>
-            <p className="mt-2 text-sm text-slate-500">
-              Upload, dissect, generate, and sandbox tactical puzzles with live AI support.
+            <p className="text-xs uppercase tracking-[0.14em] text-slate-500 dark:text-slate-300">
+              AI-first tactical workstation
+            </p>
+            <h2
+              className="mt-1 text-3xl font-semibold tracking-tight text-slate-700 dark:text-slate-100"
+              style={primaryTextStyle}
+            >
+              Puzzle Lab
+            </h2>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-300" style={secondaryTextStyle}>
+              A focused workflow for puzzle extraction, explanation, sandbox testing, and motif-based training.
             </p>
           </div>
           <div className="rounded-2xl border border-slate-200/80 dark:border-slate-700/70 bg-white/60 dark:bg-slate-900/30 px-3 py-2 text-xs text-slate-500 dark:text-slate-300">
@@ -1865,8 +1882,13 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
         <article className="neumo-surface-soft rounded-[26px] p-5 md:p-6" style={panelStyle}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs uppercase tracking-[0.08em] text-slate-500">1. Upload & Analyze Puzzle</p>
-              <h3 className="mt-1 text-xl font-semibold text-slate-700">Vision + Engine Extraction</h3>
+              <p className="text-xs uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">1. Upload & Analyze Puzzle</p>
+              <h3
+                className="mt-1 text-xl font-semibold text-slate-700 dark:text-slate-100"
+                style={primaryTextStyle}
+              >
+                Vision + Engine Extraction
+              </h3>
             </div>
             <div className="inline-flex items-center gap-2 rounded-full neumo-pill px-3 py-1 text-xs font-semibold text-slate-600" style={buttonStyle}>
               <ScanSearch className="h-3.5 w-3.5" />
@@ -1878,8 +1900,8 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
             <div
               className={`rounded-2xl border-2 border-dashed px-4 py-5 transition-all ${
                 dragging
-                  ? 'border-sky-400 bg-sky-100/55 dark:bg-sky-900/20'
-                  : 'border-slate-300/80 dark:border-slate-700/70 bg-white/45 dark:bg-slate-900/20'
+                  ? 'border-sky-400 bg-sky-100/65 dark:border-sky-400/85 dark:bg-sky-900/52'
+                  : 'border-slate-300/80 dark:border-slate-500/90 bg-white/55 dark:bg-slate-950/72'
               }`}
               onDragOver={(event) => {
                 event.preventDefault();
@@ -1901,22 +1923,27 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
               }}
             >
               <div className="flex flex-wrap items-start gap-3">
-                <ImagePlus className="h-5 w-5 text-slate-500" />
+                <ImagePlus className="h-5 w-5 text-slate-500 dark:text-slate-300" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-slate-700">Drop screenshot, paste clipboard, or browse file</p>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p
+                    className="text-sm font-medium text-slate-700 dark:text-slate-100"
+                    style={primaryTextStyle}
+                  >
+                    Drop screenshot, paste clipboard, or browse file
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-300" style={tertiaryTextStyle}>
                     Supports mobile screenshots and desktop captures. AI will detect side to move, FEN, and tactical motifs.
                   </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="rounded-full neumo-pill px-3 py-1.5 text-xs font-semibold text-slate-600 hover:-translate-y-[1px] transition"
+                      className="rounded-full neumo-pill px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-200 hover:-translate-y-[1px] transition"
                       style={buttonStyle}
                     >
                       <Upload className="mr-1 inline h-3.5 w-3.5" /> Choose image
                     </button>
-                    <span className="rounded-full bg-white/60 dark:bg-slate-800/80 px-2.5 py-1 text-[11px] text-slate-500 dark:text-slate-300">
+                    <span className="rounded-full bg-white/75 dark:bg-slate-800 px-2.5 py-1 text-[11px] text-slate-500 dark:text-slate-100 dark:ring-1 dark:ring-slate-500/65">
                       <Clipboard className="mr-1 inline h-3.5 w-3.5" /> Paste supported
                     </span>
                   </div>
@@ -1947,7 +1974,7 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
               >
                 <Crown className="h-5 w-5" fill={expectedSideToMove === 'black' ? 'currentColor' : 'none'} />
               </button>
-              <div className="rounded-xl bg-white/65 dark:bg-slate-900/35 px-2.5 py-2 text-xs text-slate-600 dark:text-slate-300">
+              <div className="rounded-xl bg-white/65 dark:bg-slate-900/62 px-2.5 py-2 text-xs text-slate-600 dark:text-slate-100 dark:ring-1 dark:ring-slate-600/70">
                 Expected side: <span className="font-semibold">{expectedSideToMove}</span>
               </div>
             </div>
@@ -1956,13 +1983,20 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
           {previewUrl && (
             <div className="mt-4 grid gap-4 lg:grid-cols-[260px_1fr]">
               <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 dark:border-slate-700/70 bg-slate-100 dark:bg-slate-900/55 h-[220px]">
-                <Image src={previewUrl} alt="Puzzle preview" fill unoptimized sizes="260px" className="object-cover" />
+                <Image
+                  src={previewUrl}
+                  alt="Puzzle preview"
+                  fill
+                  unoptimized
+                  sizes="260px"
+                  className="object-contain p-1"
+                />
               </div>
               <div className="rounded-2xl neumo-inset px-4 py-4">
-                <p className="text-xs uppercase tracking-[0.08em] text-slate-500">Image preview</p>
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{file?.name ?? 'Uploaded image'}</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  Run analysis to extract position metadata and initialize AI breakdown, Puzzle DNA, and sandbox mode.
+                <p className="text-xs uppercase tracking-[0.08em] text-slate-500" style={tertiaryTextStyle}>Image preview</p>
+                <p className="mt-2 text-sm text-slate-600 dark:text-slate-300" style={secondaryTextStyle}>{file?.name ?? 'Uploaded image'}</p>
+                <p className="mt-1 text-xs text-slate-500" style={tertiaryTextStyle}>
+                  Run analysis to extract the board, FEN, side to move, tactical motifs, and best solution line.
                 </p>
                 <button
                   type="button"
@@ -1987,7 +2021,7 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
                   style={{ width: `${((loadingStage + 1) / STAGE_TEXT.length) * 100}%` }}
                 />
               </div>
-              <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{STAGE_TEXT[loadingStage]}</p>
+              <p className="mt-3 text-sm text-slate-600 dark:text-slate-300" style={secondaryTextStyle}>{STAGE_TEXT[loadingStage]}</p>
             </div>
           )}
 
@@ -2031,22 +2065,34 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
                       : 'No forced mate'}
                 </p>
               </article>
+              <article className="rounded-xl border border-slate-200/70 dark:border-slate-700/70 bg-white/60 dark:bg-slate-900/35 px-3 py-3 sm:col-span-2">
+                <p className="text-xs uppercase tracking-[0.08em] text-slate-500">Extracted FEN</p>
+                <p className="mt-1 break-all font-mono text-xs text-slate-700 dark:text-slate-200">
+                  {analysis.fen ?? 'Unavailable'}
+                </p>
+              </article>
+              <article className="rounded-xl border border-slate-200/70 dark:border-slate-700/70 bg-white/60 dark:bg-slate-900/35 px-3 py-3">
+                <p className="text-xs uppercase tracking-[0.08em] text-slate-500">Solution line</p>
+                <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  {analysis.solutionSan.length > 0 ? analysis.solutionSan.join(' | ') : 'Unavailable'}
+                </p>
+              </article>
             </div>
           )}
         </article>
 
         <article className="neumo-surface-soft rounded-[26px] p-5 md:p-6" style={panelStyle}>
-          <p className="text-xs uppercase tracking-[0.08em] text-slate-500">2. AI Puzzle Breakdown</p>
-          <h3 className="mt-1 text-xl font-semibold text-slate-700">Conversational Tactical Explanation</h3>
+          <p className="text-xs uppercase tracking-[0.08em] text-slate-500" style={tertiaryTextStyle}>2. AI Puzzle Breakdown</p>
+          <h3 className="mt-1 text-xl font-semibold text-slate-700" style={primaryTextStyle}>Conversational Tactical Explanation</h3>
 
           {analysis ? (
             <>
               <div className="mt-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/70 bg-white/65 dark:bg-slate-900/30 px-4 py-4">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-100">AI Explanation</p>
-                  <span className="text-xs text-slate-500 dark:text-slate-300">Confidence {(analysis.explanationConfidence * 100).toFixed(0)}%</span>
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-100" style={primaryTextStyle}>AI Explanation</p>
+                  <span className="text-xs text-slate-500 dark:text-slate-300" style={tertiaryTextStyle}>Confidence {(analysis.explanationConfidence * 100).toFixed(0)}%</span>
                 </div>
-                <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">{analysis.explanation}</p>
+                <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300" style={secondaryTextStyle}>{analysis.explanation}</p>
               </div>
 
               <div className="mt-4 space-y-2">
@@ -2119,10 +2165,10 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
                       board={playbackBoard}
                       highlightedSquares={playbackHighlights}
                       arrows={playbackArrows}
-                      className="w-full"
+                      className="w-full max-w-[420px] aspect-square"
                     />
                   ) : (
-                    <div className="rounded-xl border border-slate-200/80 dark:border-slate-700/70 bg-white/45 dark:bg-slate-900/20 h-[260px] flex items-center justify-center text-sm text-slate-500">
+                    <div className="w-full max-w-[420px] aspect-square rounded-xl border border-slate-200/80 dark:border-slate-700/70 bg-white/45 dark:bg-slate-900/20 flex items-center justify-center text-sm text-slate-500">
                       No board available.
                     </div>
                   )}
@@ -2141,13 +2187,14 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
               </div>
             </>
           ) : (
-            <p className="mt-4 rounded-xl neumo-inset px-3 py-3 text-sm text-slate-500">
-              Analyze a puzzle to unlock AI breakdown, forcing-sequence walkthrough, and animated tactical playback.
+            <p className="mt-4 rounded-xl neumo-inset px-3 py-3 text-sm text-slate-500" style={tertiaryTextStyle}>
+              Analyze a puzzle to unlock AI explanation and why the tactical line works.
             </p>
           )}
         </article>
       </section>
 
+      {showArchivedPuzzleLabSections && (
       <section className="grid gap-5 xl:grid-cols-[1fr_1fr]">
         <article className="neumo-surface-soft rounded-[26px] p-5 md:p-6" style={panelStyle}>
           <p className="text-xs uppercase tracking-[0.08em] text-slate-500">3. Similar Puzzle Recommendations</p>
@@ -2216,14 +2263,15 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
           )}
         </article>
       </section>
+      )}
 
       <section className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
         <article className="neumo-surface-soft rounded-[26px] p-5 md:p-6" style={panelStyle}>
-          <p className="text-xs uppercase tracking-[0.08em] text-slate-500">5. Puzzle Sandbox Mode</p>
-          <h3 className="mt-1 text-xl font-semibold text-slate-700">Interactive Variation Workbench</h3>
+          <p className="text-xs uppercase tracking-[0.08em] text-slate-500" style={tertiaryTextStyle}>3. Puzzle Sandbox Mode</p>
+          <h3 className="mt-1 text-xl font-semibold text-slate-700" style={primaryTextStyle}>Interactive Variation Workbench</h3>
 
           <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_230px]">
-            <div>
+            <div className="w-full max-w-[560px]">
               {sandboxBoard ? (
                 <FenBoard
                   board={sandboxBoard}
@@ -2231,9 +2279,10 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
                   selectedSquare={sandboxSelectedSquare}
                   highlightedSquares={sandboxSelectedSquare ? [sandboxSelectedSquare] : []}
                   flipped={sandboxFlipped}
+                  className="w-full aspect-square"
                 />
               ) : (
-                <div className="h-[360px] rounded-2xl border border-slate-200/80 dark:border-slate-700/70 bg-white/50 dark:bg-slate-900/25 flex items-center justify-center text-sm text-slate-500">
+                <div className="w-full aspect-square rounded-2xl border border-slate-200/80 dark:border-slate-700/70 bg-white/50 dark:bg-slate-900/25 flex items-center justify-center text-sm text-slate-500">
                   Sandbox board appears after loading a puzzle.
                 </div>
               )}
@@ -2370,153 +2419,67 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
             </button>
           </div>
 
-          <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{sandboxMessage}</p>
+          <p className="mt-3 text-sm text-slate-600 dark:text-slate-300" style={secondaryTextStyle}>{sandboxMessage}</p>
           {sandboxHint && (
             <p className="mt-2 rounded-xl border border-amber-300/45 bg-amber-100/70 dark:bg-amber-900/20 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
               {sandboxHint}
             </p>
           )}
         </article>
-
         <article className="neumo-surface-soft rounded-[26px] p-5 md:p-6" style={panelStyle}>
-          <p className="text-xs uppercase tracking-[0.08em] text-slate-500">6. AI Puzzle Generator</p>
-          <h3 className="mt-1 text-xl font-semibold text-slate-700">Custom Puzzle Studio</h3>
+          <p className="text-xs uppercase tracking-[0.08em] text-slate-500" style={tertiaryTextStyle}>4. Similar Puzzle Recommendations</p>
+          <h3 className="mt-1 text-xl font-semibold text-slate-700" style={primaryTextStyle}>Motif-Matched Training Queue</h3>
 
-          <div className="mt-4 space-y-3">
-            <label className="block">
-              <span className="text-xs uppercase tracking-[0.08em] text-slate-500">FEN input (optional)</span>
-              <textarea
-                value={generatorInputs.fen}
-                onChange={(event) => {
-                  setGeneratorInputs((previous) => ({ ...previous, fen: event.target.value }));
-                }}
-                placeholder="Paste FEN or leave empty to use opening preset"
-                className="mt-1 w-full rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-white/65 dark:bg-slate-900/30 px-3 py-2 text-sm text-slate-700 dark:text-slate-200"
-                rows={3}
-              />
-            </label>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label>
-                <span className="text-xs uppercase tracking-[0.08em] text-slate-500">Opening position</span>
-                <select
-                  value={generatorInputs.opening}
-                  onChange={(event) => {
-                    setGeneratorInputs((previous) => ({ ...previous, opening: event.target.value as GeneratorOpening }));
-                  }}
-                  className="mt-1 w-full rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-white/65 dark:bg-slate-900/30 px-3 py-2 text-sm"
-                >
-                  {Object.keys(OPENING_FENS).map((opening) => (
-                    <option key={opening} value={opening}>
-                      {opening}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span className="text-xs uppercase tracking-[0.08em] text-slate-500">Motif preference</span>
-                <select
-                  value={generatorInputs.motif}
-                  onChange={(event) => {
-                    setGeneratorInputs((previous) => ({ ...previous, motif: event.target.value }));
-                  }}
-                  className="mt-1 w-full rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-white/65 dark:bg-slate-900/30 px-3 py-2 text-sm"
-                >
-                  {MOTIF_POOL.map((motif) => (
-                    <option key={motif} value={motif}>
-                      {motif}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span className="text-xs uppercase tracking-[0.08em] text-slate-500">Desired difficulty</span>
-                <input
-                  type="range"
-                  min={700}
-                  max={2600}
-                  step={50}
-                  value={generatorInputs.difficulty}
-                  onChange={(event) => {
-                    setGeneratorInputs((previous) => ({ ...previous, difficulty: Number(event.target.value) }));
-                  }}
-                  className="mt-2 w-full"
-                />
-                <p className="text-xs text-slate-500">{generatorInputs.difficulty} Elo</p>
-              </label>
-
-              <label>
-                <span className="text-xs uppercase tracking-[0.08em] text-slate-500">Mate target</span>
-                <select
-                  value={generatorInputs.mateIn}
-                  onChange={(event) => {
-                    setGeneratorInputs((previous) => ({ ...previous, mateIn: Number(event.target.value) as 1 | 2 | 3 }));
-                  }}
-                  className="mt-1 w-full rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-white/65 dark:bg-slate-900/30 px-3 py-2 text-sm"
-                >
-                  <option value={1}>Mate in 1</option>
-                  <option value={2}>Mate in 2</option>
-                  <option value={3}>Mate in 3</option>
-                </select>
-              </label>
-            </div>
-
-            <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-              <input
-                type="checkbox"
-                checked={generatorInputs.useCurrentBoard}
-                onChange={(event) => {
-                  setGeneratorInputs((previous) => ({ ...previous, useCurrentBoard: event.target.checked }));
-                }}
-              />
-              Use current analyzed board when available
-            </label>
-
-            <button
-              type="button"
-              onClick={() => {
-                void generatePuzzle();
-              }}
-              disabled={generatorLoading}
-              className="rounded-full neumo-pill px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
-              style={buttonStyle}
-            >
-              <WandSparkles className="mr-1 inline h-4 w-4" /> {generatorLoading ? 'Generating…' : 'Generate Puzzle'}
-            </button>
-          </div>
-
-          {generatedPuzzles.length > 0 && (
-            <div className="mt-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/70 bg-white/60 dark:bg-slate-900/25 px-3 py-3">
-              <p className="text-xs uppercase tracking-[0.08em] text-slate-500">Recent generated</p>
-              <div className="mt-2 space-y-2 max-h-44 overflow-y-auto">
-                {generatedPuzzles.slice(0, 5).map((item) => (
+          {analysis ? (
+            <div className="mt-4 grid gap-3">
+              {analysis.recommendations.map((recommendation) => (
+                <article key={recommendation.id} className="rounded-2xl border border-slate-200/80 dark:border-slate-700/70 bg-white/60 dark:bg-slate-900/25 px-3 py-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-100">{recommendation.title}</p>
+                      <p className="text-xs text-slate-500">{recommendation.estimatedElo} Elo • Depth {recommendation.depth}</p>
+                    </div>
+                    <span className="rounded-full bg-emerald-100/90 dark:bg-emerald-900/30 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-200">
+                      {recommendation.solvePercentage}% solve
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {recommendation.motifs.map((motif) => (
+                      <span key={`${recommendation.id}-${motif}`} className="rounded-full bg-sky-100/90 dark:bg-sky-900/30 px-2 py-0.5 text-[10px] font-semibold text-sky-700 dark:text-sky-200">
+                        {motif}
+                      </span>
+                    ))}
+                  </div>
                   <button
-                    key={item.id}
                     type="button"
                     onClick={() => {
-                      setAnalysis(inferAnalysisFromGenerated(item));
-                      initializeSandboxFromFen(item.fen, extractSideFromFen(item.fen, 'white'));
-                      markRecentlyViewed(item.id);
+                      if (recommendation.fen) {
+                        initializeSandboxFromFen(recommendation.fen, 'white');
+                      }
+                      setSandboxMessage(`Loaded recommendation: ${recommendation.title}`);
                     }}
-                    className="w-full rounded-xl border border-slate-200/70 dark:border-slate-700/70 bg-white/70 dark:bg-slate-900/35 px-3 py-2 text-left hover:-translate-y-[1px] transition"
+                    className="mt-3 rounded-full neumo-pill px-3 py-1.5 text-xs font-semibold text-slate-700"
+                    style={buttonStyle}
                   >
-                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-100">{item.title}</p>
-                    <p className="text-xs text-slate-500">{item.motif} • {item.desiredDifficulty} Elo • Mate in {item.mateIn}</p>
+                    <SquareArrowOutUpRight className="mr-1 inline h-3.5 w-3.5" /> Load in sandbox
                   </button>
-                ))}
-              </div>
+                </article>
+              ))}
             </div>
+          ) : (
+            <p className="mt-4 rounded-xl neumo-inset px-3 py-3 text-sm text-slate-500" style={tertiaryTextStyle}>
+              Recommendations appear after analysis, matched by motifs and estimated difficulty.
+            </p>
           )}
         </article>
       </section>
 
+      {showArchivedPuzzleLabSections && (
       <article className="neumo-surface-soft rounded-[26px] p-5 md:p-6" style={panelStyle}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.08em] text-slate-500">7. Puzzle History / Library</p>
-            <h3 className="mt-1 text-xl font-semibold text-slate-700">Searchable Puzzle Repository</h3>
+            <p className="text-xs uppercase tracking-[0.08em] text-slate-500" style={tertiaryTextStyle}>7. Puzzle History / Library</p>
+            <h3 className="mt-1 text-xl font-semibold text-slate-700" style={primaryTextStyle}>Searchable Puzzle Repository</h3>
           </div>
           <div className="rounded-full neumo-pill px-3 py-1 text-xs font-semibold text-slate-600" style={buttonStyle}>
             <History className="mr-1 inline h-3.5 w-3.5" /> {libraryRows.length} entries
@@ -2634,13 +2597,65 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle }: PuzzleLabPanelProps)
           )}
         </div>
       </article>
+      )}
 
-      <footer className="rounded-2xl border border-slate-200/80 dark:border-slate-700/70 bg-white/55 dark:bg-slate-900/25 px-4 py-3 text-xs text-slate-500 dark:text-slate-300">
-        <div className="flex flex-wrap items-center gap-2">
-          <Bot className="h-3.5 w-3.5" />
-          Integrated with <code>/solve</code>, <code>/assistant</code>, puzzle submission storage, and dashboard theming system.
-        </div>
-      </footer>
+      {showArchivedPuzzleLabSections && (
+        <article className="neumo-surface-soft rounded-[26px] p-5 md:p-6" style={panelStyle}>
+          <p className="text-xs uppercase tracking-[0.08em] text-slate-500">6. AI Puzzle Generator</p>
+          <h3 className="mt-1 text-xl font-semibold text-slate-700">Archived Generator Controls</h3>
+          <p className="mt-2 text-sm text-slate-500">Generator is hidden from the primary flow but preserved for future reactivation.</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label>
+              <span className="text-xs uppercase tracking-[0.08em] text-slate-500">Motif</span>
+              <select
+                value={generatorInputs.motif}
+                onChange={(event) => {
+                  setGeneratorInputs((previous) => ({ ...previous, motif: event.target.value }));
+                }}
+                className="mt-1 w-full rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-white/65 dark:bg-slate-900/30 px-3 py-2 text-sm"
+              >
+                {MOTIF_POOL.map((motif) => (
+                  <option key={motif} value={motif}>
+                    {motif}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                void generatePuzzle();
+              }}
+              disabled={generatorLoading}
+              className="self-end rounded-full neumo-pill px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
+              style={buttonStyle}
+            >
+              <WandSparkles className="mr-1 inline h-4 w-4" /> {generatorLoading ? 'Generating…' : 'Generate Puzzle'}
+            </button>
+          </div>
+          {generatedPuzzles.length > 0 && (
+            <div className="mt-4 space-y-2">
+              {generatedPuzzles.slice(0, 3).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setAnalysis(inferAnalysisFromGenerated(item));
+                    initializeSandboxFromFen(item.fen, extractSideFromFen(item.fen, 'white'));
+                    markRecentlyViewed(item.id);
+                  }}
+                  className="w-full rounded-xl border border-slate-200/70 dark:border-slate-700/70 bg-white/70 dark:bg-slate-900/35 px-3 py-2 text-left"
+                >
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-100">{item.title}</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </article>
+      )}
+
     </section>
   );
 }
+
+

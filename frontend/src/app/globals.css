@@ -320,3 +320,32 @@ body {
 .dark .dashboard-theme [class~='border-slate-200'] {
   border-color: rgba(71, 85, 105, 0.72) !important;
 }
+
+/* Puzzle Lab-specific dark contrast boost for gray-highlight containers */
+.dark .dashboard-theme .puzzle-lab-contrast [class~='bg-white/70'],
+.dark .dashboard-theme .puzzle-lab-contrast [class~='bg-white/65'],
+.dark .dashboard-theme .puzzle-lab-contrast [class~='bg-white/60'],
+.dark .dashboard-theme .puzzle-lab-contrast [class~='bg-white/55'],
+.dark .dashboard-theme .puzzle-lab-contrast [class~='bg-white/50'],
+.dark .dashboard-theme .puzzle-lab-contrast [class~='bg-white/45'] {
+  background-color: rgba(2, 6, 23, 0.82) !important;
+}
+
+.dark .dashboard-theme .puzzle-lab-contrast [class~='border-slate-200/90'],
+.dark .dashboard-theme .puzzle-lab-contrast [class~='border-slate-200/80'],
+.dark .dashboard-theme .puzzle-lab-contrast [class~='border-slate-200/70'],
+.dark .dashboard-theme .puzzle-lab-contrast [class~='border-slate-200'] {
+  border-color: rgba(100, 116, 139, 0.82) !important;
+}
+
+.dark .dashboard-theme .puzzle-lab-contrast [class~='text-slate-700'] {
+  color: rgb(241, 245, 249) !important;
+}
+
+.dark .dashboard-theme .puzzle-lab-contrast [class~='text-slate-600'] {
+  color: rgb(226, 232, 240) !important;
+}
+
+.dark .dashboard-theme .puzzle-lab-contrast [class~='text-slate-500'] {
+  color: rgb(203, 213, 225) !important;
+}

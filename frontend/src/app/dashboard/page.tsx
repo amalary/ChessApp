@@ -13,6 +13,7 @@ import {
   ChevronUp,
   Download,
   LayoutDashboard,
+  LogOut,
   Puzzle,
   Settings,
 } from 'lucide-react';
@@ -26,9 +27,11 @@ import {
   type PuzzleSubmissionRecord,
 } from '@/lib/puzzle-submissions';
 import {
+  LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT,
   readActiveLocalAuthUser,
   readScopedStorageValue,
   resolveUserSettingsScope,
+  writeActiveLocalAuthUser,
   writeScopedStorageValue,
 } from '@/lib/dashboard-theme-settings';
 
@@ -2584,6 +2587,7 @@ export default function DashboardPage() {
   const [isAccuracyByDifficultySectionOpen, setIsAccuracyByDifficultySectionOpen] = useState(true);
   const [isFirstMoveAccuracySectionOpen, setIsFirstMoveAccuracySectionOpen] = useState(true);
   const [isTransitioningToChessApp, setIsTransitioningToChessApp] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showSubmissionHistory, setShowSubmissionHistory] = useState(false);
   const [submissions, setSubmissions] = useState<PuzzleSubmissionRecord[]>([]);
   const [expandedSubmissionId, setExpandedSubmissionId] = useState<string | null>(null);
@@ -2606,6 +2610,7 @@ export default function DashboardPage() {
     null,
   );
   const themeSavedNoticeTimeoutRef = useRef<number | null>(null);
+  const autoThemePersistTimeoutRef = useRef<number | null>(null);
   const appliedThemeScopeRef = useRef<string | null>(null);
   const isDark = theme === 'dark' || (theme === 'system' && resolvedTheme === 'dark');
   const backendUrl = useMemo(
@@ -2626,14 +2631,17 @@ export default function DashboardPage() {
     syncSettingsScope();
     window.addEventListener('storage', syncSettingsScope);
     window.addEventListener('focus', syncSettingsScope);
+    window.addEventListener(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT, syncSettingsScope);
     return () => {
       window.removeEventListener('storage', syncSettingsScope);
       window.removeEventListener('focus', syncSettingsScope);
+      window.removeEventListener(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT, syncSettingsScope);
     };
   }, [user?.sub]);
 
   const persistThemeSettings = useCallback(
-    (themeSettings: ThemeSettings) => {
+    (themeSettings: ThemeSettings, options?: { showSavedNotice?: boolean }) => {
+      const showSavedNotice = options?.showSavedNotice ?? true;
       const normalizedAccent = normalizeHexColor(themeSettings.accentColor) ?? DEFAULT_DASHBOARD_ACCENT;
       const normalizedSecondary =
         normalizeHexColor(themeSettings.secondaryColor) ?? DEFAULT_DASHBOARD_SECONDARY;
@@ -2672,6 +2680,14 @@ export default function DashboardPage() {
         gradientEnabled: themeSettings.gradientEnabled,
         gradientDirection: normalizedDirection,
       });
+      if (!showSavedNotice) {
+        setThemeSavedNoticeVisible(false);
+        if (themeSavedNoticeTimeoutRef.current !== null) {
+          window.clearTimeout(themeSavedNoticeTimeoutRef.current);
+          themeSavedNoticeTimeoutRef.current = null;
+        }
+        return;
+      }
       setThemeSavedNoticeVisible(true);
       if (themeSavedNoticeTimeoutRef.current !== null) {
         window.clearTimeout(themeSavedNoticeTimeoutRef.current);
@@ -2846,6 +2862,9 @@ export default function DashboardPage() {
       if (themeSavedNoticeTimeoutRef.current !== null) {
         window.clearTimeout(themeSavedNoticeTimeoutRef.current);
       }
+      if (autoThemePersistTimeoutRef.current !== null) {
+        window.clearTimeout(autoThemePersistTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -2864,8 +2883,34 @@ export default function DashboardPage() {
     currentThemeSettings.gradientEnabled !== savedThemeSettings.gradientEnabled ||
     currentThemeSettings.gradientDirection !== savedThemeSettings.gradientDirection;
 
+  useEffect(() => {
+    if (!hasUnsavedThemeChanges) {
+      if (autoThemePersistTimeoutRef.current !== null) {
+        window.clearTimeout(autoThemePersistTimeoutRef.current);
+        autoThemePersistTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    if (autoThemePersistTimeoutRef.current !== null) {
+      window.clearTimeout(autoThemePersistTimeoutRef.current);
+    }
+
+    autoThemePersistTimeoutRef.current = window.setTimeout(() => {
+      persistThemeSettings(currentThemeSettings, { showSavedNotice: false });
+      autoThemePersistTimeoutRef.current = null;
+    }, 350);
+
+    return () => {
+      if (autoThemePersistTimeoutRef.current !== null) {
+        window.clearTimeout(autoThemePersistTimeoutRef.current);
+        autoThemePersistTimeoutRef.current = null;
+      }
+    };
+  }, [currentThemeSettings, hasUnsavedThemeChanges, persistThemeSettings]);
+
   const handleSaveTheme = () => {
-    persistThemeSettings(currentThemeSettings);
+    persistThemeSettings(currentThemeSettings, { showSavedNotice: true });
   };
 
   const handleThemeReset = () => {
@@ -2881,12 +2926,28 @@ export default function DashboardPage() {
       return;
     }
     if (hasUnsavedThemeChanges) {
-      persistThemeSettings(currentThemeSettings);
+      persistThemeSettings(currentThemeSettings, { showSavedNotice: true });
     }
     setIsTransitioningToChessApp(true);
     window.setTimeout(() => {
       router.push('/solve-test');
     }, 280);
+  };
+
+  const handleLogout = () => {
+    if (isLoggingOut) {
+      return;
+    }
+
+    setIsLoggingOut(true);
+
+    if (user?.sub) {
+      window.location.href = '/auth/logout';
+      return;
+    }
+
+    writeActiveLocalAuthUser(null);
+    router.push('/login-test');
   };
 
   const solvedCount = submissions.length;
@@ -3101,7 +3162,7 @@ export default function DashboardPage() {
                 <p className="text-xs uppercase tracking-[0.14em] font-semibold" style={brandTextStyle}>
                   Terrible App Chess
                 </p>
-                <p className="text-lg font-semibold text-slate-700">Dashboard</p>
+                <p className="text-lg font-semibold text-slate-700 dark:text-slate-100">Dashboard</p>
               </div>
             </div>
 
@@ -3114,19 +3175,27 @@ export default function DashboardPage() {
                     key={item.label}
                     type="button"
                     onClick={() => setActiveNavLabel(item.label)}
-                    className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-all duration-200 ${
+                    className={`dashboard-nav-button group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-all duration-200 ${
                       active
-                        ? 'neumo-pill text-slate-700 hover:-translate-y-[1px] hover:shadow-[0_8px_18px_rgba(15,23,42,0.12)]'
-                        : 'text-slate-500 hover:text-slate-700 hover:bg-white/30 hover:-translate-y-[1px] hover:shadow-[0_8px_18px_rgba(15,23,42,0.1)]'
+                        ? 'dashboard-nav-active neumo-pill text-slate-700 dark:text-slate-100 hover:-translate-y-[1px] hover:shadow-[0_8px_18px_rgba(15,23,42,0.12)]'
+                        : 'dashboard-nav-inactive text-slate-500 dark:text-slate-300 hover:text-slate-700 dark:hover:text-slate-100 hover:bg-white/30 dark:hover:bg-white/12 hover:-translate-y-[1px] hover:shadow-[0_8px_18px_rgba(15,23,42,0.1)]'
                     }`}
                     style={
                       active
                         ? {
                             ...(dashboardButtonStyle ?? {}),
-                            color: rgbaFromChannels(accentChannels, 0.95),
-                            background: `linear-gradient(135deg, ${rgbaFromChannels(accentChannels, 0.18)} 0%, rgba(255, 255, 255, 0.68) 100%)`,
+                            color: isDark ? 'rgb(248, 250, 252)' : rgbaFromChannels(accentChannels, 0.95),
+                            background: isDark
+                              ? `linear-gradient(135deg, ${rgbaFromChannels(accentChannels, 0.32)} 0%, rgba(15, 23, 42, 0.72) 100%)`
+                              : `linear-gradient(135deg, ${rgbaFromChannels(accentChannels, 0.18)} 0%, rgba(255, 255, 255, 0.68) 100%)`,
                           }
-                        : dashboardButtonStyle
+                        : isDark
+                          ? {
+                              ...(dashboardButtonStyle ?? {}),
+                              color: 'rgb(203, 213, 225)',
+                              background: 'rgba(15, 23, 42, 0.34)',
+                            }
+                          : dashboardButtonStyle
                     }
                   >
                     <span className="h-8 w-8 rounded-xl neumo-inset flex items-center justify-center transition-transform duration-200 group-hover:scale-105">
@@ -3156,6 +3225,17 @@ export default function DashboardPage() {
               aria-label="Toggle theme"
             >
               {isDark ? 'Dark' : 'Light'}
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+              className="mt-3 w-full neumo-pill px-4 py-2.5 text-sm font-semibold text-slate-600 flex items-center justify-center gap-2 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_10px_22px_rgba(15,23,42,0.14)] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
+              style={dashboardButtonStyle}
+              aria-label="Log out"
+            >
+              <LogOut className="h-4 w-4" />
+              {isLoggingOut ? 'Logging out...' : 'Log out'}
             </button>
           </aside>
 
@@ -4009,7 +4089,11 @@ export default function DashboardPage() {
             )}
 
             {isPuzzleLabView && (
-              <PuzzleLabPanel panelStyle={dashboardContainerStyle} buttonStyle={dashboardButtonStyle} />
+              <PuzzleLabPanel
+                panelStyle={dashboardContainerStyle}
+                buttonStyle={dashboardButtonStyle}
+                isDark={isDark}
+              />
             )}
 
             {isSettingsView && (

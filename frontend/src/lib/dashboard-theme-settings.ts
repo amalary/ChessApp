@@ -1,4 +1,5 @@
 export const LOCAL_AUTH_ACTIVE_USER_STORAGE_KEY = 'chessapp.local-auth.active-user';
+export const LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT = 'chessapp.local-auth.active-user.updated';
 
 type LocalAuthActiveUser = {
   id?: unknown;
@@ -74,6 +75,7 @@ export function writeActiveLocalAuthUser(user: {
 
   if (!user) {
     window.localStorage.removeItem(LOCAL_AUTH_ACTIVE_USER_STORAGE_KEY);
+    window.dispatchEvent(new Event(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT));
     return;
   }
 
@@ -83,6 +85,7 @@ export function writeActiveLocalAuthUser(user: {
     email: typeof user.email === 'string' ? user.email : '',
   };
   window.localStorage.setItem(LOCAL_AUTH_ACTIVE_USER_STORAGE_KEY, JSON.stringify(normalized));
+  window.dispatchEvent(new Event(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT));
 }
 
 export function resolveUserSettingsScope(auth0Sub: string | null | undefined): string | null {
