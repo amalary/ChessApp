@@ -35,7 +35,9 @@ def _extract_bearer_token(request: Request) -> str | None:
 def _decode_token(token: str) -> dict:
     audience = _require_env("AUTH0_AUDIENCE")
     issuer_domain = _require_env("AUTH0_DOMAIN").strip().rstrip("/")
-    if not issuer_domain.startswith("http://") and not issuer_domain.startswith("https://"):
+    if not issuer_domain.startswith("http://") and not issuer_domain.startswith(
+        "https://"
+    ):
         issuer_domain = f"https://{issuer_domain}"
     issuer = f"{issuer_domain}/"
 

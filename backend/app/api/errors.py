@@ -81,4 +81,3 @@ def install_api_error_handlers(app: FastAPI) -> None:
             code="internal_server_error",
             message="Internal server error.",
         )
-

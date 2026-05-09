@@ -55,7 +55,9 @@ ANALYTICS_PATH_PREFIXES = ("/analytics", "/dashboard")
 
 
 class RateLimitViolation(Exception):
-    def __init__(self, message: str = RATE_LIMIT_MESSAGE, retry_after: int | None = None):
+    def __init__(
+        self, message: str = RATE_LIMIT_MESSAGE, retry_after: int | None = None
+    ):
         super().__init__(message)
         self.message = message
         self.retry_after = retry_after
@@ -113,7 +115,9 @@ async def populate_request_identity(request: Request) -> None:
         request.state.is_authenticated = True
 
 
-def rate_limited_response(message: str = RATE_LIMIT_MESSAGE, retry_after: int | None = None) -> JSONResponse:
+def rate_limited_response(
+    message: str = RATE_LIMIT_MESSAGE, retry_after: int | None = None
+) -> JSONResponse:
     headers = {}
     if retry_after is not None and retry_after > 0:
         headers["Retry-After"] = str(retry_after)
@@ -145,7 +149,10 @@ def _optional_redis_client(request: Request) -> Redis | None:
 
 
 def _is_health_check(path: str) -> bool:
-    return any(path == health_path or path.startswith(f"{health_path}/") for health_path in HEALTH_PATHS)
+    return any(
+        path == health_path or path.startswith(f"{health_path}/")
+        for health_path in HEALTH_PATHS
+    )
 
 
 def _is_sensitive_path(path: str) -> bool:
@@ -174,7 +181,9 @@ def _log_block(
     )
 
 
-async def enforce_global_limits(request: Request, redis_client: Redis) -> JSONResponse | None:
+async def enforce_global_limits(
+    request: Request, redis_client: Redis
+) -> JSONResponse | None:
     path = request.url.path
     if _is_health_check(path):
         return None
@@ -413,7 +422,9 @@ async def get_or_set_analytics_cache(
         return cached
 
     payload = await loader()
-    await set_cached_analytics_response(request=request, payload=payload, ttl_seconds=ttl_seconds)
+    await set_cached_analytics_response(
+        request=request, payload=payload, ttl_seconds=ttl_seconds
+    )
     return payload
 
 

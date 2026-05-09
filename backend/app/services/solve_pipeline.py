@@ -142,7 +142,11 @@ def _validate_expected_mate_in(expected_mate_in: int | None) -> None:
 
 
 def _resolve_side_options(expected_side_to_move: str, side_hint: str) -> list[str]:
-    requested_side = expected_side_to_move if expected_side_to_move in {"white", "black"} else "white"
+    requested_side = (
+        expected_side_to_move
+        if expected_side_to_move in {"white", "black"}
+        else "white"
+    )
     side_options = [requested_side]
     if side_hint in {"white", "black"} and side_hint not in side_options:
         side_options.append(side_hint)
@@ -152,14 +156,18 @@ def _resolve_side_options(expected_side_to_move: str, side_hint: str) -> list[st
     return side_options
 
 
-def _select_valid_candidates(transcribed: object, side_options: list[str]) -> list[object]:
+def _select_valid_candidates(
+    transcribed: object, side_options: list[str]
+) -> list[object]:
     candidates = build_candidates(
         board_map=transcribed.board_map,
         side_options=side_options,
         base_confidence=transcribed.confidence,
         uncertain_squares=transcribed.uncertain_squares,
     )
-    valid_candidates = [candidate for candidate in candidates if candidate.validation.passed]
+    valid_candidates = [
+        candidate for candidate in candidates if candidate.validation.passed
+    ]
     if valid_candidates:
         return valid_candidates
     raise ValueError(
@@ -230,7 +238,9 @@ def _build_candidates_debug(
             "transcription_confidence": candidate.confidence,
             "mate_found": mate_by_fen.get(candidate.fen) is not None,
             "mate_in": (
-                mate_by_fen[candidate.fen].mate_in if mate_by_fen.get(candidate.fen) else None
+                mate_by_fen[candidate.fen].mate_in
+                if mate_by_fen.get(candidate.fen)
+                else None
             ),
         }
         for candidate in valid_candidates

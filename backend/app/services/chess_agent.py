@@ -139,12 +139,26 @@ class ChessAssistantAgent:
 
         initial_state: ChessAssistantState = {
             "user_id": user_id,
-            "puzzle_id": puzzle_id.strip() if isinstance(puzzle_id, str) and puzzle_id.strip() else None,
+            "puzzle_id": (
+                puzzle_id.strip()
+                if isinstance(puzzle_id, str) and puzzle_id.strip()
+                else None
+            ),
             "fen": fen.strip() if isinstance(fen, str) and fen.strip() else None,
-            "solver_move_san": solver_move_san.strip() if isinstance(solver_move_san, str) and solver_move_san.strip() else None,
-            "solver_line": [move.strip() for move in (solver_line or []) if isinstance(move, str) and move.strip()],
+            "solver_move_san": (
+                solver_move_san.strip()
+                if isinstance(solver_move_san, str) and solver_move_san.strip()
+                else None
+            ),
+            "solver_line": [
+                move.strip()
+                for move in (solver_line or [])
+                if isinstance(move, str) and move.strip()
+            ],
             "user_message": user_message if isinstance(user_message, str) else "",
-            "requested_mode": cast(Literal["hint", "explain", "theme", "followup"], mode),
+            "requested_mode": cast(
+                Literal["hint", "explain", "theme", "followup"], mode
+            ),
             "legal_moves": [],
             "board_valid": False,
             "intent": "",
@@ -215,13 +229,17 @@ class ChessAssistantAgent:
         return {
             **state,
             "user_message": clean_message,
-            "requested_mode": cast(Literal["hint", "explain", "theme", "followup"], clean_mode),
+            "requested_mode": cast(
+                Literal["hint", "explain", "theme", "followup"], clean_mode
+            ),
             "solver_move_san": (state.get("solver_move_san") or "").strip() or None,
             "fen": (state.get("fen") or "").strip() or None,
             "solver_line": [move for move in state.get("solver_line", []) if move],
         }
 
-    def detect_prompt_injection(self, state: ChessAssistantState) -> ChessAssistantState:
+    def detect_prompt_injection(
+        self, state: ChessAssistantState
+    ) -> ChessAssistantState:
         combined_text = " ".join(
             [
                 state.get("user_message", ""),
@@ -278,7 +296,9 @@ class ChessAssistantAgent:
         message = state.get("user_message", "").lower()
         asks_only_app_help = any(topic in message for topic in APP_FEATURE_HELP)
 
-        requires_position = mode in {"hint", "explain", "theme"} or not asks_only_app_help
+        requires_position = (
+            mode in {"hint", "explain", "theme"} or not asks_only_app_help
+        )
 
         if not requires_position:
             return state
@@ -353,7 +373,9 @@ class ChessAssistantAgent:
             next_state["referenced_move"] = solver_move
 
         if solver_line:
-            verification = self._run_tool("verify_checkmate", fen=fen, solver_line=solver_line)
+            verification = self._run_tool(
+                "verify_checkmate", fen=fen, solver_line=solver_line
+            )
             if not verification["line_valid"]:
                 return self._helpful_missing_context(
                     next_state,
@@ -443,7 +465,9 @@ class ChessAssistantAgent:
             text = f"Likely tactical themes: {', '.join(themes)}."
             confidence = 0.74
         else:
-            text = "I'm not fully sure of the tactical theme from the verified data alone."
+            text = (
+                "I'm not fully sure of the tactical theme from the verified data alone."
+            )
             confidence = 0.45
 
         return {
@@ -462,7 +486,9 @@ class ChessAssistantAgent:
 
         referenced_token = _first_move_token(message)
         if referenced_token and fen and state.get("board_valid"):
-            move_validation = self._run_tool("validate_move", fen=fen, move_san=referenced_token)
+            move_validation = self._run_tool(
+                "validate_move", fen=fen, move_san=referenced_token
+            )
             if not move_validation["valid"]:
                 return {
                     **state,
@@ -509,23 +535,32 @@ class ChessAssistantAgent:
         response_text = response_text.replace("system prompt", "internal prompt")
         response_text = response_text.replace("developer prompt", "internal rules")
 
-        themes = [theme for theme in state.get("theme_tags", []) if theme in APPROVED_THEMES]
+        themes = [
+            theme for theme in state.get("theme_tags", []) if theme in APPROVED_THEMES
+        ]
 
         referenced_move = state.get("referenced_move")
         if referenced_move and state.get("fen"):
-            move_valid = self._run_tool("validate_move", fen=state["fen"], move_san=referenced_move)
+            move_valid = self._run_tool(
+                "validate_move", fen=state["fen"], move_san=referenced_move
+            )
             solver_move = state.get("solver_move_san")
             if not move_valid["valid"] and referenced_move != solver_move:
                 referenced_move = solver_move
 
-        claims_checkmate = "checkmate" in response_text.lower() or "mate" in response_text.lower()
-        if claims_checkmate and not state.get("checkmate_verified") and state.get("requested_mode") in {
-            "explain",
-            "hint",
-        }:
-            response_text = (
-                "I can confirm the best move from the solver, but I cannot verify checkmate from the available line yet."
-            )
+        claims_checkmate = (
+            "checkmate" in response_text.lower() or "mate" in response_text.lower()
+        )
+        if (
+            claims_checkmate
+            and not state.get("checkmate_verified")
+            and state.get("requested_mode")
+            in {
+                "explain",
+                "hint",
+            }
+        ):
+            response_text = "I can confirm the best move from the solver, but I cannot verify checkmate from the available line yet."
 
         confidence = state.get("confidence", 0.0)
         if not isinstance(confidence, (float, int)):
@@ -657,9 +692,15 @@ class ChessAssistantAgent:
 
     def _tool_get_solver_solution(self, payload: dict[str, Any]) -> dict[str, Any]:
         solver_move_san = payload.get("solver_move_san")
-        solver_line = [m for m in payload.get("solver_line", []) if isinstance(m, str) and m]
+        solver_line = [
+            m for m in payload.get("solver_line", []) if isinstance(m, str) and m
+        ]
         return {
-            "solver_move_san": solver_move_san if isinstance(solver_move_san, str) and solver_move_san else None,
+            "solver_move_san": (
+                solver_move_san
+                if isinstance(solver_move_san, str) and solver_move_san
+                else None
+            ),
             "solver_line": solver_line,
         }
 

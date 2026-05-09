@@ -7,4 +7,3 @@ from app.services.board_position_service import (  # noqa: F401
     build_candidates,
     rotate_board_map_180,
 )
-

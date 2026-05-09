@@ -106,7 +106,9 @@ def _to_user_view(user: LocalAuthUser) -> UserView:
     )
 
 
-def _find_existing_user_for_signup(db: Session, payload: SignupRequest) -> LocalAuthUser | None:
+def _find_existing_user_for_signup(
+    db: Session, payload: SignupRequest
+) -> LocalAuthUser | None:
     return db.execute(
         select(LocalAuthUser).where(
             or_(

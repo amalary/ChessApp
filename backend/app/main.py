@@ -162,7 +162,9 @@ def _build_first_move_assessment(
     status, is_first_move_correct = _classify_first_move(
         normalized_first_move, best_move
     )
-    first_move_threshold = max(0.0, min(1.0, _env_float("FIRST_MOVE_MIN_CONFIDENCE", 0.75)))
+    first_move_threshold = max(
+        0.0, min(1.0, _env_float("FIRST_MOVE_MIN_CONFIDENCE", 0.75))
+    )
     invalid_reason = None
 
     if confidence < first_move_threshold:

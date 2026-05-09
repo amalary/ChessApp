@@ -255,4 +255,3 @@ def build_candidates(
                     ),
                 )
     return [best_by_fen[fen] for fen in fen_order]
-

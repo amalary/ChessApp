@@ -1,2 +1,1 @@
 """Shared API contract helpers."""
-

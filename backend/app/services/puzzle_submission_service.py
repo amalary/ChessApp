@@ -83,13 +83,7 @@ def _normalize_position_check(raw: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _tokenize_moves(solution_lines: list[str]) -> int:
-    return len(
-        [
-            token
-            for token in " ".join(solution_lines).split()
-            if token.strip()
-        ]
-    )
+    return len([token for token in " ".join(solution_lines).split() if token.strip()])
 
 
 def estimate_puzzle_difficulty_rating(
@@ -136,7 +130,9 @@ def _is_valid_fen(fen: str | None) -> bool:
 
 def _resolve_difficulty_rating(submission: LocalAuthPuzzleSubmission) -> int:
     difficulty_rating = getattr(submission, "difficulty_rating", None)
-    estimated_difficulty_rating = getattr(submission, "estimated_difficulty_rating", None)
+    estimated_difficulty_rating = getattr(
+        submission, "estimated_difficulty_rating", None
+    )
     puzzle_elo = getattr(submission, "puzzle_elo", None)
 
     if isinstance(difficulty_rating, int):
@@ -153,7 +149,9 @@ def _resolve_difficulty_rating(submission: LocalAuthPuzzleSubmission) -> int:
         confidence=position_check.get("confidence"),
         attempts_used=position_check.get("attemptsUsed"),
         solution_lines=(
-            submission.solution_lines if isinstance(submission.solution_lines, list) else []
+            submission.solution_lines
+            if isinstance(submission.solution_lines, list)
+            else []
         ),
     )
 
@@ -209,7 +207,9 @@ def build_difficulty_bucket_analytics(
             continue
         if first_move_assessment.get("isValidForFirstMoveAccuracy") is False:
             continue
-        is_first_move_correct = _to_bool(first_move_assessment.get("isFirstMoveCorrect"))
+        is_first_move_correct = _to_bool(
+            first_move_assessment.get("isFirstMoveCorrect")
+        )
         if is_first_move_correct is None:
             continue
 
@@ -222,7 +222,10 @@ def build_difficulty_bucket_analytics(
         confidence = _to_float(position_check.get("confidence"))
         if confidence is None or confidence < clamped_threshold:
             continue
-        if not isinstance(submission.solution_lines, list) or len(submission.solution_lines) == 0:
+        if (
+            not isinstance(submission.solution_lines, list)
+            or len(submission.solution_lines) == 0
+        ):
             continue
 
         rating = _resolve_difficulty_rating(submission)
@@ -296,7 +299,9 @@ def map_submission(submission: LocalAuthPuzzleSubmission) -> PuzzleSubmissionRes
         ),
         positionCheck=_normalize_position_check(submission.position_check),
         solutionLines=(
-            submission.solution_lines if isinstance(submission.solution_lines, list) else []
+            submission.solution_lines
+            if isinstance(submission.solution_lines, list)
+            else []
         ),
         firstMoveAssessment=(
             submission.first_move_assessment
