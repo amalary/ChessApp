@@ -2570,7 +2570,7 @@ export default function DashboardPage() {
   const { user } = useUser();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const requestedSection = searchParams.get('section')?.trim().toLowerCase() ?? null;
+  const requestedSection = searchParams?.get('section')?.trim().toLowerCase() ?? null;
   const initialNavLabel =
     NAV_ITEMS.find((item) => item.label.toLowerCase() === requestedSection)?.label ?? 'Dashboard';
   const isMounted = useSyncExternalStore(
