@@ -254,3 +254,84 @@
  GET /solve-test 200 in 74ms (compile: 14ms, proxy.ts: 16ms, render: 45ms)
  GET /dashboard 200 in 67ms (compile: 7ms, proxy.ts: 13ms, render: 46ms)
  GET /dashboard 200 in 178ms (compile: 8ms, proxy.ts: 13ms, render: 158ms)
+ GET /dashboard 200 in 146ms (compile: 9ms, proxy.ts: 14ms, render: 123ms)
+ GET /solve-test 200 in 68ms (compile: 10ms, proxy.ts: 13ms, render: 45ms)
+ GET /dashboard 200 in 56ms (compile: 7ms, proxy.ts: 13ms, render: 36ms)
+ GET /solve-test 200 in 58ms (compile: 10ms, proxy.ts: 13ms, render: 35ms)
+ GET /dashboard 200 in 52ms (compile: 8ms, proxy.ts: 11ms, render: 34ms)
+ GET /solve-test 200 in 62ms (compile: 9ms, proxy.ts: 12ms, render: 41ms)
+ GET /dashboard 200 in 61ms (compile: 8ms, proxy.ts: 11ms, render: 42ms)
+ ✓ Compiled in 374ms
+ GET /dashboard 200 in 665ms (compile: 336ms, proxy.ts: 10ms, render: 319ms)
+ ✓ Compiled in 586ms
+ ✓ Compiled in 685ms
+ GET /dashboard 200 in 589ms (compile: 281ms, proxy.ts: 14ms, render: 294ms)
+ ✓ Compiled in 908ms
+ GET /dashboard 200 in 562ms (compile: 260ms, proxy.ts: 9ms, render: 292ms)
+ GET /dashboard 200 in 143ms (compile: 11ms, proxy.ts: 9ms, render: 123ms)
+ ✓ Compiled in 1813ms
+ GET /solve-test 200 in 58ms (compile: 9ms, proxy.ts: 10ms, render: 38ms)
+ GET /dashboard 200 in 366ms (compile: 284ms, proxy.ts: 13ms, render: 69ms)
+ GET /solve-test 200 in 55ms (compile: 8ms, proxy.ts: 12ms, render: 34ms)
+ GET /dashboard 200 in 51ms (compile: 6ms, proxy.ts: 10ms, render: 34ms)
+ GET /solve-test 200 in 58ms (compile: 8ms, proxy.ts: 13ms, render: 37ms)
+ GET /dashboard 200 in 61ms (compile: 10ms, proxy.ts: 13ms, render: 38ms)
+ GET /solve-test 200 in 58ms (compile: 9ms, proxy.ts: 11ms, render: 37ms)
+ GET /dashboard 200 in 70ms (compile: 10ms, proxy.ts: 14ms, render: 46ms)
+ GET /solve-test 200 in 64ms (compile: 9ms, proxy.ts: 18ms, render: 37ms)
+ GET /dashboard 200 in 61ms (compile: 8ms, proxy.ts: 12ms, render: 41ms)
+ GET /solve-test 200 in 59ms (compile: 7ms, proxy.ts: 11ms, render: 41ms)
+ GET /dashboard 200 in 54ms (compile: 11ms, proxy.ts: 10ms, render: 34ms)
+ GET /solve-test 200 in 83ms (compile: 24ms, proxy.ts: 10ms, render: 49ms)
+ GET /dashboard 200 in 91ms (compile: 24ms, proxy.ts: 11ms, render: 56ms)
+ ✓ Compiled in 203ms
+ ✓ Compiled in 1476ms
+ ✓ Compiled in 837ms
+ ✓ Compiled in 537ms
+ GET /solve-test 200 in 42ms (compile: 6ms, proxy.ts: 7ms, render: 30ms)
+ GET /dashboard 200 in 288ms (compile: 229ms, proxy.ts: 5ms, render: 55ms)
+ GET /solve-test 200 in 39ms (compile: 5ms, proxy.ts: 7ms, render: 27ms)
+ GET /dashboard 200 in 28ms (compile: 2ms, proxy.ts: 3ms, render: 22ms)
+ ✓ Compiled in 366ms
+ ✓ Compiled in 95ms
+ ✓ Compiled in 316ms
+ ✓ Compiled in 199ms
+ GET /solve-test 200 in 42ms (compile: 10ms, proxy.ts: 9ms, render: 23ms)
+ GET /dashboard 200 in 317ms (compile: 256ms, proxy.ts: 5ms, render: 56ms)
+ GET /solve-test 200 in 46ms (compile: 7ms, proxy.ts: 10ms, render: 29ms)
+ GET /dashboard 200 in 41ms (compile: 7ms, proxy.ts: 9ms, render: 25ms)
+ GET /solve-test 200 in 42ms (compile: 6ms, proxy.ts: 6ms, render: 30ms)
+ GET /dashboard 200 in 37ms (compile: 5ms, proxy.ts: 6ms, render: 26ms)
+ GET /solve-test 200 in 38ms (compile: 5ms, proxy.ts: 7ms, render: 26ms)
+ GET /dashboard 200 in 40ms (compile: 7ms, proxy.ts: 9ms, render: 23ms)
+ GET /solve-test 200 in 38ms (compile: 5ms, proxy.ts: 6ms, render: 27ms)
+ GET /dashboard 200 in 35ms (compile: 3ms, proxy.ts: 5ms, render: 26ms)
+ ✓ Compiled in 308ms
+ ✓ Compiled in 194ms
+ GET /solve-test?retrySubmissionId=e8fea9d9-09cf-48b0-8033-48cafc5ba7e9 200 in 345ms (compile: 280ms, proxy.ts: 5ms, render: 60ms)
+ GET /dashboard 200 in 288ms (compile: 231ms, proxy.ts: 8ms, render: 49ms)
+ GET /solve-test 200 in 31ms (compile: 3ms, proxy.ts: 3ms, render: 26ms)
+ GET /dashboard 200 in 47ms (compile: 6ms, proxy.ts: 12ms, render: 29ms)
+ GET /solve-test?retrySubmissionId=3d26a0f5-30b3-4adf-ac32-bdacccea4736 200 in 45ms (compile: 5ms, proxy.ts: 10ms, render: 30ms)
+ GET /dashboard 200 in 35ms (compile: 7ms, proxy.ts: 7ms, render: 21ms)
+ GET /solve-test 200 in 42ms (compile: 5ms, proxy.ts: 8ms, render: 29ms)
+ GET /dashboard 200 in 41ms (compile: 5ms, proxy.ts: 5ms, render: 32ms)
+ ✓ Compiled in 1269ms
+ GET /solve-test?retrySubmissionId=75ed60ff-da29-4478-9534-b7b0efe11ed1 200 in 35ms (compile: 3ms, proxy.ts: 5ms, render: 26ms)
+ GET /dashboard 200 in 292ms (compile: 231ms, proxy.ts: 4ms, render: 56ms)
+ GET /solve-test 200 in 42ms (compile: 7ms, proxy.ts: 6ms, render: 29ms)
+ GET /dashboard 200 in 35ms (compile: 5ms, proxy.ts: 7ms, render: 24ms)
+ GET /solve-test 200 in 37ms (compile: 6ms, proxy.ts: 5ms, render: 27ms)
+ GET /dashboard 200 in 26ms (compile: 2ms, proxy.ts: 3ms, render: 21ms)
+ GET /solve-test?retrySubmissionId=8467bcd6-5f66-414b-88e4-32c5a7d1ab6a 200 in 31ms (compile: 5ms, proxy.ts: 6ms, render: 19ms)
+ GET /dashboard 200 in 42ms (compile: 6ms, proxy.ts: 6ms, render: 30ms)
+ ✓ Compiled in 1326ms
+ ✓ Compiled in 1030ms
+ GET /dashboard 200 in 430ms (compile: 215ms, proxy.ts: 9ms, render: 206ms)
+ ✓ Compiled in 766ms
+ ✓ Compiled in 344ms
+ GET /solve-test?retrySubmissionId=8467bcd6-5f66-414b-88e4-32c5a7d1ab6a 200 in 57ms (compile: 3ms, proxy.ts: 4ms, render: 50ms)
+ GET /solve-test?retrySubmissionId=8467bcd6-5f66-414b-88e4-32c5a7d1ab6a 200 in 58ms (compile: 2ms, proxy.ts: 15ms, render: 41ms)
+ GET /dashboard 200 in 356ms (compile: 275ms, proxy.ts: 8ms, render: 74ms)
+ GET /solve-test?retrySubmissionId=8467bcd6-5f66-414b-88e4-32c5a7d1ab6a 200 in 31ms (compile: 7ms, proxy.ts: 4ms, render: 21ms)
+ GET /dashboard 200 in 35ms (compile: 5ms, proxy.ts: 6ms, render: 24ms)
