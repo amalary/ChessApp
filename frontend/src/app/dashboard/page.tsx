@@ -19,11 +19,13 @@ import {
 } from 'lucide-react';
 import { AgentPage } from './agent-panel';
 import { PuzzleLabPanel } from './puzzle-lab-panel';
+import { TrainingPanel } from './training-panel';
 import {
   getPuzzleSubmissionUpdateEventName,
   estimatePuzzleElo,
   markPuzzleSubmissionNotificationsSeen,
   readPuzzleSubmissions,
+  replacePuzzleSubmissions,
   type PuzzleSubmissionRecord,
 } from '@/lib/puzzle-submissions';
 import {
@@ -2590,6 +2592,8 @@ export default function DashboardPage() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showSubmissionHistory, setShowSubmissionHistory] = useState(false);
   const [submissions, setSubmissions] = useState<PuzzleSubmissionRecord[]>([]);
+  const [submissionsSyncLoading, setSubmissionsSyncLoading] = useState(false);
+  const [submissionsSyncError, setSubmissionsSyncError] = useState<string | null>(null);
   const [expandedSubmissionId, setExpandedSubmissionId] = useState<string | null>(null);
   const [accentColor, setAccentColor] = useState<string>(DEFAULT_DASHBOARD_ACCENT);
   const [secondaryColor, setSecondaryColor] = useState<string>(DEFAULT_DASHBOARD_SECONDARY);
@@ -2858,6 +2862,63 @@ export default function DashboardPage() {
   }, [backendUrl, submissions.length]);
 
   useEffect(() => {
+    const localAuthUserId = readActiveLocalAuthUser()?.id ?? '';
+    if (!localAuthUserId) {
+      setSubmissionsSyncLoading(false);
+      setSubmissionsSyncError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function loadStoredSubmissions() {
+      setSubmissionsSyncLoading(true);
+      setSubmissionsSyncError(null);
+      try {
+        const response = await fetch(`${backendUrl}/puzzles/submissions?limit=500`, {
+          method: 'GET',
+          headers: {
+            'X-Local-Auth-User-Id': localAuthUserId,
+          },
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`puzzle submissions sync failed: ${response.status}`);
+        }
+
+        const payload = (await response.json()) as unknown;
+        if (!Array.isArray(payload)) {
+          throw new Error('puzzle submissions sync returned unexpected payload');
+        }
+        if (cancelled) {
+          return;
+        }
+        replacePuzzleSubmissions(payload as PuzzleSubmissionRecord[]);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setSubmissionsSyncError(
+          error instanceof Error ? error.message : 'failed_to_sync_puzzle_submissions',
+        );
+      } finally {
+        if (!cancelled) {
+          setSubmissionsSyncLoading(false);
+        }
+      }
+    }
+
+    loadStoredSubmissions();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [backendUrl, settingsStorageScope]);
+
+  useEffect(() => {
     return () => {
       if (themeSavedNoticeTimeoutRef.current !== null) {
         window.clearTimeout(themeSavedNoticeTimeoutRef.current);
@@ -3103,6 +3164,7 @@ export default function DashboardPage() {
     : undefined;
   const isDashboardView = activeNavLabel === 'Dashboard';
   const isAnalyticsView = activeNavLabel === 'Analytics';
+  const isTrainingView = activeNavLabel === 'Training';
   const isPuzzleLabView = activeNavLabel === 'Puzzle Lab';
   const isAgentView = activeNavLabel === 'Agent';
   const isSettingsView = activeNavLabel === 'Settings';
@@ -4096,6 +4158,19 @@ export default function DashboardPage() {
               />
             )}
 
+            {isTrainingView && (
+              <TrainingPanel
+                submissions={submissions}
+                submissionsLoading={submissionsSyncLoading}
+                submissionsError={submissionsSyncError}
+                difficultyAnalytics={difficultyBucketAnalytics}
+                difficultyAnalyticsLoading={difficultyBucketAnalyticsLoading}
+                difficultyAnalyticsError={difficultyBucketAnalyticsError}
+                panelStyle={dashboardContainerStyle}
+                buttonStyle={dashboardButtonStyle}
+              />
+            )}
+
             {isSettingsView && (
               <SettingsPanel
                 isDark={isDark}
@@ -4139,7 +4214,12 @@ export default function DashboardPage() {
 
             {isAgentView && <AgentPage panelStyle={dashboardContainerStyle} />}
 
-            {!isDashboardView && !isAnalyticsView && !isPuzzleLabView && !isAgentView && !isSettingsView && (
+            {!isDashboardView &&
+              !isAnalyticsView &&
+              !isTrainingView &&
+              !isPuzzleLabView &&
+              !isAgentView &&
+              !isSettingsView && (
               <section
                 className="neumo-surface-soft rounded-[26px] p-5 md:p-7"
                 style={dashboardContainerStyle}

@@ -3,7 +3,7 @@
 import React, { useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { useUser } from '@auth0/nextjs-auth0/client';
 import { useTheme } from 'next-themes';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { CheckCircle2, Crown, LayoutDashboard } from 'lucide-react';
 import {
@@ -11,6 +11,7 @@ import {
   estimatePuzzleElo,
   FirstMoveAssessmentStatus,
   getPuzzleSubmissionUpdateEventName,
+  readPuzzleSubmissions,
   type PuzzleSubmissionRecord,
   getUnseenPuzzleSubmissionCount,
   replacePuzzleSubmissions,
@@ -106,6 +107,30 @@ async function createSubmissionImageDataUrl(file: File): Promise<string | null> 
     return null;
   } finally {
     URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function dataUrlToFile(dataUrl: string, fileName: string): File | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) {
+    return null;
+  }
+
+  const mimeType = match[1];
+  const base64Payload = match[2];
+  try {
+    const binary = window.atob(base64Payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    const safeFileName = fileName.trim() ? fileName : `retry-puzzle-${Date.now()}.jpg`;
+    return new File([bytes], safeFileName, { type: mimeType });
+  } catch {
+    return null;
   }
 }
 
@@ -219,6 +244,8 @@ export default function SolveTestClient() {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { user } = useUser();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const retrySubmissionId = searchParams?.get('retrySubmissionId')?.trim() ?? '';
   const isMounted = useSyncExternalStore(
     () => () => {},
     () => true,
@@ -253,6 +280,7 @@ export default function SolveTestClient() {
   const [gradientDirection, setGradientDirection] = useState<GradientDirection>('top-to-bottom');
   const [settingsStorageScope, setSettingsStorageScope] = useState<string | null>(null);
   const appliedThemeScopeRef = React.useRef<string | null>(null);
+  const hydratedRetrySubmissionIdRef = React.useRef<string | null>(null);
   const submitStatusReturnTimerRef = React.useRef<number | null>(null);
   const submitStatusResetTimerRef = React.useRef<number | null>(null);
 
@@ -488,6 +516,50 @@ export default function SolveTestClient() {
       controller.abort();
     };
   }, [backendUrl]);
+
+  useEffect(() => {
+    if (!retrySubmissionId) {
+      return;
+    }
+    if (hydratedRetrySubmissionIdRef.current === retrySubmissionId) {
+      return;
+    }
+
+    hydratedRetrySubmissionIdRef.current = retrySubmissionId;
+    const submission = readPuzzleSubmissions().find((entry) => entry.id === retrySubmissionId);
+    if (!submission) {
+      setError('Could not load this review puzzle from your saved submission history.');
+      return;
+    }
+
+    const imageDataUrl =
+      typeof submission.originalPuzzleImageDataUrl === 'string' &&
+      submission.originalPuzzleImageDataUrl.startsWith('data:image/')
+        ? submission.originalPuzzleImageDataUrl
+        : null;
+    if (!imageDataUrl) {
+      setError('This review puzzle has no stored image available to preload.');
+      return;
+    }
+
+    const hydratedFile = dataUrlToFile(imageDataUrl, submission.fileName || `retry-${submission.id}.jpg`);
+    if (!hydratedFile) {
+      setError('Failed to prepare the review puzzle image. Please upload it manually.');
+      return;
+    }
+
+    setFile(hydratedFile);
+    setSolutionLines([]);
+    setSolveMeta(null);
+    setSubmitStatus('idle');
+    setError(null);
+    setSelectedSourceSquare(null);
+    setFirstMoveAttempt(null);
+    setFirstMoveSolveOutcome(null);
+    setAttemptId(createAttemptId());
+    setAttemptStartedAtMs(performance.now());
+    setQueenIsWhite(submission.expectedSideToMove === 'white');
+  }, [retrySubmissionId]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const chosen = e.target.files?.[0] ?? null;

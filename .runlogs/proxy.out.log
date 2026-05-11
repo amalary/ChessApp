@@ -3,3 +3,16 @@
 2026/05/06 22:01:51 The proxy has started successfully and is ready for new connections!
 2026/05/06 22:01:51 [chessapp-477519:us-west2:chess-app-project] Accepted connection from 127.0.0.1:58749
 2026/05/06 22:01:51 [chessapp-477519:us-west2:chess-app-project] client closed the connection
+2026/05/08 12:39:31 [chessapp-477519:us-west2:chess-app-project] Accepted connection from 127.0.0.1:52071
+2026/05/08 12:39:32 [chessapp-477519:us-west2:chess-app-project] Accepted connection from 127.0.0.1:53514
+2026/05/08 12:39:32 [chessapp-477519:us-west2:chess-app-project] Accepted connection from 127.0.0.1:53516
+2026/05/08 12:39:32 [chessapp-477519:us-west2:chess-app-project] Accepted connection from 127.0.0.1:53518
+2026/05/08 13:48:59 [chessapp-477519:us-west2:chess-app-project] instance closed the connection
+2026/05/08 13:48:59 [chessapp-477519:us-west2:chess-app-project] instance closed the connection
+2026/05/08 13:48:59 [chessapp-477519:us-west2:chess-app-project] instance closed the connection
+2026/05/08 13:48:59 [chessapp-477519:us-west2:chess-app-project] instance closed the connection
+2026/05/08 13:55:08 [chessapp-477519:us-west2:chess-app-project] Accepted connection from 127.0.0.1:65293
+2026/05/08 13:55:08 [chessapp-477519:us-west2:chess-app-project] Accepted connection from 127.0.0.1:65294
+2026/05/08 15:47:17 [chessapp-477519:us-west2:chess-app-project] Accepted connection from 127.0.0.1:53636
+2026/05/08 15:47:18 [chessapp-477519:us-west2:chess-app-project] Accepted connection from 127.0.0.1:63264
+2026/05/09 00:20:13 [chessapp-477519:us-west2:chess-app-project] Accepted connection from 127.0.0.1:53325

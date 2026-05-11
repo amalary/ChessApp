@@ -1851,6 +1851,13 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
   const tertiaryTextStyle: React.CSSProperties = {
     color: isDark ? 'rgb(186, 200, 217)' : 'rgb(100, 116, 139)',
   };
+  const pasteSupportedBadgeStyle: React.CSSProperties = isDark
+    ? {
+        backgroundColor: 'rgb(241, 245, 249)',
+        color: 'rgb(0, 0, 0)',
+        fontWeight: 600,
+      }
+    : {};
 
   return (
     <section className="puzzle-lab-contrast space-y-5">
@@ -1943,7 +1950,10 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
                     >
                       <Upload className="mr-1 inline h-3.5 w-3.5" /> Choose image
                     </button>
-                    <span className="rounded-full bg-white/75 dark:bg-slate-800 px-2.5 py-1 text-[11px] text-slate-500 dark:text-slate-100 dark:ring-1 dark:ring-slate-500/65">
+                    <span
+                      className="rounded-full bg-white/75 px-2.5 py-1 text-[11px] text-zinc-500 dark:ring-1 dark:ring-slate-500/75"
+                      style={pasteSupportedBadgeStyle}
+                    >
                       <Clipboard className="mr-1 inline h-3.5 w-3.5" /> Paste supported
                     </span>
                   </div>
