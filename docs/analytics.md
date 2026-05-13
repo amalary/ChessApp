@@ -6,7 +6,7 @@
   "related_routes": ["/dashboard"],
   "related_features": ["accuracy tracking", "theme analysis", "first-move metrics", "history insights"],
   "intended_audience": "end_user",
-  "last_updated": "AUTO_GENERATED"
+  "last_updated": "2026-05-12"
 }
 ```
 
@@ -14,33 +14,31 @@
 
 ## Overview
 ### Metrics Scope
-Analytics is shown inside the `/dashboard` page and summarizes recent puzzle performance from locally stored solve submissions.
+Analytics appears in `/dashboard` and summarizes puzzle performance trends.
 
 ### Data Sources
-- Data comes from puzzle submissions recorded in browser local storage.
-- For local-auth users, solve uploads are also persisted server-side in Cloud SQL and can be reloaded into local storage on login.
-
-<!-- REVIEW_NEEDED: Confirm whether analytics data should be persisted server-side in production. --> *Tackling now* 
+- Browser-local puzzle submissions and derived stats.
+- For local-auth users, submissions can also be loaded from backend `/puzzles/submissions`.
 
 ## How It Works
 ### User Actions
 1. Open `/dashboard`.
-2. Click **Analytics** in the sidebar.
-3. Expand sections to inspect details.
+2. Click **Analytics**.
+3. Expand sections for details.
 
 ### System Behavior
-- Theme accuracy is computed from recent solved submissions.
-- Dashboard charts update when local submission history changes.
-- Some sections are expandable/collapsible for readability.
+- Theme accuracy is computed from recent solves.
+- Trend views refresh when submission history changes.
+- Some sections show placeholder content when data is limited.
 
 ### Edge Cases
-- If you have little or no solve history, metrics can be sparse.
-- Some sections are scaffolded placeholders.
+- Sparse history leads to sparse metrics.
+- Low-confidence solves can skew trend interpretation.
 
 ## Step-by-Step Usage
-### Open Analytics Section
+### Open Analytics
 - Navigate to `/dashboard`.
-- Select **Analytics** in the left nav.
+- Select **Analytics**.
 
 ### Read Core Metrics
 Start with:
@@ -49,39 +47,39 @@ Start with:
 - Associated puzzle list
 
 ### Expand Detailed Sections
-Available detailed sections include:
+Detailed sections include:
 - Solve Time vs Difficulty
 - Puzzle Rating Progression
 - First-Move Accuracy
 
 ## Expected Output
 ### Metric Cards
-You should see cards and sections that reflect your recent solve activity.
+Cards should reflect your recent solve activity.
 
-### Thematic and Trend Views
+### Trend Views
 You should see:
 - Theme-level accuracy percentages
-- Trend-style chart areas
+- Progression/trend visuals
 - First-move quality summaries when enough data exists
 
 ## Common Errors
 ### Missing or Sparse Data
-- Cause: not enough solved puzzles stored locally.
+- Cause: not enough solved puzzles.
 - Result: weak or limited trend signals.
 
-### Inconsistent Metric Expectations
-- Cause: analytics uses local stored submissions and app-specific scoring.
-- Result: values may differ from external trackers.
+### Inconsistent Expectations
+- Cause: metrics are app-specific and based on stored submissions.
+- Result: values can differ from external trackers.
 
 ## Tips
 ### Reading Trends
-- Look at multi-solve patterns, not one puzzle.
-- Focus on weakest theme and first-move accuracy together.
+- Use multi-puzzle patterns, not single-puzzle swings.
+- Pair weakest-theme view with first-move accuracy.
 
 ### Improving Decision Quality
-- Use analytics after several solves.
-- Re-check low-confidence solves before drawing conclusions.
+- Review analytics after multiple solves.
+- Re-check low-confidence solves before acting on trends.
 
 ## Planned or Partial Areas
-- **Planned feature � not currently available:** fully implemented "Accuracy by Difficulty" section content.
-- Some analytics subsections currently render scaffold text in the UI.
+- **Planned feature - not currently available:** fully implemented `Accuracy by Difficulty` content.
+- Some analytics subsections still render scaffold text.

@@ -18,6 +18,7 @@ from app.db_auth import get_db
 from app.local_auth_user import get_optional_local_auth_user
 from app.middleware.rate_limit_middleware import rate_limit_middleware
 from app.models_auth import LocalAuthUser
+from app.routes.agent import router as agent_router
 from app.routers import assistant, auth, health, puzzles
 from app.services.gemini_fen import fen_from_image_bytes
 from app.services.mate_solver import find_mate_in_1_to_3
@@ -42,9 +43,24 @@ STOCKFISH_NOT_FOUND_DETAIL = (
     "to the executable path."
 )
 UCI_MOVE_PATTERN = re.compile(r"^[a-h][1-8][a-h][1-8][qrbn]?$")
+ENV_OVERRIDE_KEYS = {
+    "DATABASE_URL",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+    "DB_USER",
+    "DB_PASSWORD",
+    "DB_NAME",
+    "DB_HOST",
+    "DB_PORT",
+}
 
 
-def _load_env_file(path: Path) -> None:
+def _load_env_file(
+    path: Path,
+    *,
+    override_existing: bool = False,
+    override_keys: set[str] | None = None,
+) -> None:
     if not path.exists() or not path.is_file():
         return
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -58,16 +74,30 @@ def _load_env_file(path: Path) -> None:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip().strip("\"'")
-        if key and key not in os.environ:
+        should_override = bool(override_keys and key in override_keys)
+        if key and (
+            key not in os.environ or override_existing or should_override
+        ):
             os.environ[key] = value
 
 
 def _bootstrap_env() -> None:
     here = Path(__file__).resolve()
+    backend_env = here.parents[1] / ".env"
+    _load_env_file(
+        backend_env,
+        override_existing=True,
+        override_keys=ENV_OVERRIDE_KEYS,
+    )
+
     candidates = [Path.cwd() / ".env", here.parents[2] / ".env"]
     for parent in here.parents:
         candidates.append(parent / "ChessApp" / ".env")
+
+    backend_env_resolved = backend_env.resolve()
     for env_path in candidates:
+        if env_path.exists() and env_path.resolve() == backend_env_resolved:
+            continue
         _load_env_file(env_path)
 
     if "GOOGLE_API_KEY" not in os.environ and "GEMINI_API_KEY" in os.environ:
@@ -356,6 +386,7 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(assistant.router)
 app.include_router(puzzles.router)
+app.include_router(agent_router, prefix="/agent")
 
 
 @app.exception_handler(RateLimitViolation)

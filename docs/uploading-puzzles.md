@@ -3,10 +3,10 @@
   "title": "Uploading Puzzles",
   "slug": "uploading-puzzles",
   "category": "core-feature",
-  "related_routes": ["/solve"],
+  "related_routes": ["/solve-test", "/solve"],
   "related_features": ["image upload", "upload validation", "side-to-move selection"],
   "intended_audience": "end_user",
-  "last_updated": "AUTO_GENERATED"
+  "last_updated": "2026-05-12"
 }
 ```
 

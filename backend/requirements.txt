@@ -41,4 +41,5 @@ sqlalchemy>=2.0
 psycopg[binary]
 langchain
 langgraph
-
+pgvector
+python-dotenv

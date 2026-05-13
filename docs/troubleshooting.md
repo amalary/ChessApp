@@ -3,10 +3,10 @@
   "title": "Troubleshooting",
   "slug": "troubleshooting",
   "category": "support",
-  "related_routes": ["/solve", "/assistant", "/dashboard", "/login-test"],
+  "related_routes": ["/solve-test", "/assistant", "/dashboard", "/login-test"],
   "related_features": ["upload troubleshooting", "solve troubleshooting", "assistant troubleshooting", "auth troubleshooting"],
   "intended_audience": "end_user",
-  "last_updated": "AUTO_GENERATED"
+  "last_updated": "2026-05-12"
 }
 ```
 
@@ -21,29 +21,24 @@ This page covers common issues with:
 - Login/session state
 
 ### Before You Start
-Before deeper debugging:
-1. Refresh the page.
+1. Refresh page.
 2. Retry with a smaller, clearer image.
-3. Confirm backend URL and app session are active.
+3. Confirm backend is running at `127.0.0.1:8010`.
 
 ## How It Works
 ### User Actions
 - Identify where failure occurs (upload, solve, dashboard, assistant).
-- Capture exact on-screen error text.
+- Capture exact error text.
 - Retry with one controlled change at a time.
 
 ### System Behavior
-- Frontend shows backend `detail` or `error` text when available.
-- Backend applies file checks, rate limits, and solve validation.
-- Assistant applies auth checks and response guardrails.
-
-### Edge Cases
-- Browser can accept a file that backend rejects.
-- Low-confidence board extraction can produce weak solve outcomes.
+- Frontend surfaces backend `detail` text when available.
+- Backend enforces upload checks, rate limits, and solve validation.
+- Assistant requires valid Auth0 bearer token.
 
 ## Step-by-Step Usage
 ### Identify the Symptom
-Classify the issue first:
+Classify issue first:
 - Upload fails
 - Solve fails
 - Solve returns no mate
@@ -51,72 +46,52 @@ Classify the issue first:
 - Login/token error
 
 ### Isolate the Area
-Use this map:
-- Upload errors: file type/size or image quality.
-- Solve errors: FEN/position/engine/backend issues.
+- Upload errors: file type/size/image quality.
+- Solve errors: FEN/position/engine/backend dependencies.
 - Assistant errors: token/context/guardrails.
 
 ### Apply Resolution Steps
-1. Re-upload a cleaner image (PNG/JPG/WEBP).
+1. Re-upload cleaner image (PNG/JPG/WEBP).
 2. Re-check side-to-move selector.
 3. Re-select first move and solve again.
-4. Re-authenticate if assistant token error appears.
-
-## Expected Output
-### Resolution Signals
-- Upload preview appears.
-- Solve returns SAN line or a clear "no mate" result.
-- Assistant returns a normal response instead of token/guardrail error.
-
-### Escalation Criteria
-Escalate to maintainers if:
-- Reproducible failures continue after multiple clean retries.
-- Backend repeatedly returns 5xx errors.
-- Assistant always fails despite valid auth and recent solved puzzle.
+4. Re-authenticate when assistant token errors appear.
 
 ## Common Errors
 ### Upload and Solve Failures
 - **Issue:** `Invalid file type or size.`
-  - Cause: unsupported MIME type or image >10MB.
+  - Cause: unsupported MIME or image >10MB.
   - Fix: convert/compress to PNG/JPEG/WEBP under 10MB.
-
-- **Issue:** Puzzle cannot be read or appears incorrect.
-  - Cause: blurry/obstructed board.
-  - Fix: crop tightly, improve clarity, retry.
 
 - **Issue:** `Invalid FEN returned from Gemini` or `Invalid chess position detected`.
   - Cause: extraction produced invalid board state.
-  - Fix: upload a cleaner board image and retry.
+  - Fix: upload clearer board image.
 
 - **Issue:** `No forced mate (1-3)`.
   - Cause: no forced mate in supported range.
-  - Fix: verify puzzle type; retry if image quality was poor.
+  - Fix: verify puzzle type and retry with clearer input if needed.
 
-- **Issue:** solve seems slow or blocked.
-  - Cause: backend busy/rate limited or dependency pressure.
-  - Fix: wait briefly and retry.
+- **Issue:** `Stockfish not found...`.
+  - Cause: backend cannot resolve Stockfish binary path.
+  - Fix: install Stockfish and set `STOCKFISH_PATH`.
 
-### Authentication Failures
-- **Issue:** Missing or invalid access token.
-  - Cause: expired/missing session.
-  - Fix: sign in again and retry.
+### Auth and Assistant Failures
+- **Issue:** `Cannot reach backend auth service ...`.
+  - Cause: frontend local-auth proxy cannot reach backend `/auth/*`.
+  - Fix: start backend and recheck `BACKEND_URL` / `NEXT_PUBLIC_BACKEND_URL`.
 
-<!-- REVIEW_NEEDED: Confirm production user-facing login route and session refresh flow. -->
+- **Issue:** `Missing Auth0 access token. Please sign in again.`
+  - Cause: assistant route requires Auth0 bearer token.
+  - Fix: sign in via Auth0 and retry.
 
-### Assistant Request Failures
-- **Issue:** Missing puzzle context prompt.
-  - Cause: no recent solved puzzle context available.
-  - Fix: solve a puzzle first, then ask again.
-
-- **Issue:** Guardrail refusal.
-  - Cause: unsafe instruction or blocked tool request pattern.
-  - Fix: rephrase as a chess or app-usage question.
+- **Issue:** `Please solve or upload a puzzle first...`
+  - Cause: no puzzle context for assistant grounding.
+  - Fix: solve a puzzle first.
 
 ## Tips
 ### Fast Isolation Tips
-- Change one variable at a time (image, side selector, question text).
-- Keep a copy of exact error text.
+- Change one variable at a time.
+- Keep exact error text for comparison.
 
 ### Reproducibility Tips
-- Retry with the same image and same steps.
-- Note whether failure is consistent or intermittent.
+- Retry with same image and same steps.
+- Note if issue is consistent or intermittent.

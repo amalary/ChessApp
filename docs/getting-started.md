@@ -4,9 +4,9 @@
   "slug": "getting-started",
   "category": "onboarding",
   "related_routes": ["/login-test", "/solve-test", "/dashboard"],
-  "related_features": ["authentication", "puzzle solve flow", "dashboard navigation"],
+  "related_features": ["local signup/login", "puzzle solve flow", "dashboard navigation"],
   "intended_audience": "end_user",
-  "last_updated": "AUTO_GENERATED"
+  "last_updated": "2026-05-12"
 }
 ```
 
@@ -14,75 +14,71 @@
 
 ## Overview
 ### Audience
-This guide is for players using the web app to upload puzzle images, solve mate puzzles, and review progress.
+This guide is for players using local signup/login, puzzle solving, dashboard analytics, and assistant tools.
 
 ### Prerequisites
 - A modern browser.
-- Access to the app frontend.
-- A clear chess puzzle image (PNG, JPG, or WEBP recommended).
-
-<!-- REVIEW_NEEDED: Confirm whether your production entry point should be /dashboard, /solve-test, or a custom landing page. -->
+- Frontend app access.
+- Backend running on `127.0.0.1:8010`.
+- A clear chess puzzle image (PNG/JPEG/WEBP recommended).
 
 ## How It Works
 ### User Actions
-1. Open the app.
-2. Sign in (if your deployment requires it).
-3. Go to puzzle solving.
-4. Upload a puzzle image and run solve.
-5. Open Dashboard for analytics and settings.
+1. Open `/login-test`.
+2. Sign up or log in with local auth.
+3. Solve puzzles in `/solve-test`.
+4. Open `/dashboard` to review progress.
+5. Use Agent from Dashboard when Auth0 session/token is available.
 
 ### System Behavior
-- The solve flow sends your image to the backend `/solve` endpoint.
-- The backend extracts a position, validates it, and searches for mate in 1 to 3.
-- Results are shown as solution moves plus position-check metadata.
+- Local auth calls frontend `/api/local-auth/*`, which proxies to backend `/auth/signup` and `/auth/login`.
+- Solve flow sends image data to backend `POST /solve`.
+- Dashboard reads local stored history and can hydrate from `/puzzles/submissions` for logged local-auth users.
 
 ### Edge Cases
-- If authentication is missing for protected routes, requests can fail with access-token errors.
-- If the image is unclear or invalid, solve can fail before returning a line.
+- Assistant messages can fail with token errors if Auth0 access token is unavailable.
+- Solve can fail when image quality is too low for FEN extraction.
 
 ## Step-by-Step Usage
-### Sign In
-- If you are using the local test flow, open `/login-test` and use signup/login.
-- For Auth0-backed assistant calls, a valid Auth0 session is required.
+### Sign In (Local Auth)
+- Open `/login-test`.
+- Use **Signup** to create an account or **Login** for existing local account.
 
-<!-- REVIEW_NEEDED: Confirm whether local auth should remain user-facing or development-only. -->
-
-### Access Puzzle Solve
+### Solve a Puzzle
 - Open `/solve-test`.
-- Upload an image.
-- Select your first move on the board overlay.
+- Upload image.
+- Select your first move.
 - Press **Solve**.
 
-### Access Dashboard
+### Open Dashboard
 - Open `/dashboard`.
-- Use the left sidebar to switch between Dashboard, Analytics, Agent, and Settings.
-- Open `/agent` to jump directly to the Agent section via redirect.
+- Use sidebar sections for Dashboard, Analytics, Agent, and Settings.
 
 ## Expected Output
 ### Successful States
-- A solution line appears under **Solution**.
-- Position-check metadata appears (side to move, confidence, attempts, mate status).
-- Solved submissions are stored locally for analytics and assistant context.
+- Signup/login success message appears.
+- Solve returns SAN/UCI line or a clear no-mate result.
+- Dashboard and analytics update from stored submissions.
 
 ### Verification Checklist
-- You can see your uploaded image preview.
-- **Solve** is enabled after first-move selection.
-- A result appears in the Solution panel without backend errors.
+- `/login-test` accepts credentials.
+- `/solve-test` shows image preview and solve output.
+- `/dashboard` loads navigation and panels.
 
 ## Common Errors
 ### Authentication Issues
-- "Missing Auth0 access token. Please sign in again." when sending assistant messages.
-- Invalid or missing bearer token on protected backend routes.
+- `Missing Auth0 access token. Please sign in again.` in Agent chat.
+- `Cannot reach backend auth service ...` when frontend cannot proxy to backend `/auth/*`.
 
 ### Connectivity Issues
-- Backend unreachable (network failure).
-- Service unavailable if backend dependencies (for example Redis) are not ready.
+- Backend unreachable from frontend (`127.0.0.1:8010` not running).
+- Backend dependency failures (for example Redis not available at startup).
 
 ## Tips
 ### First Session Tips
-- Start with a high-contrast puzzle image.
+- Start with high-contrast board images.
 - Confirm side to move before solving.
 
-### Account and Session Tips
-- Keep your session active before using assistant features.
-- If assistant calls fail, refresh and sign in again.
+### Assistant Tips
+- Solve at least one puzzle first so Agent has puzzle context.
+- Re-authenticate if Agent returns Auth0 token errors.

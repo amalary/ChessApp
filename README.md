@@ -19,17 +19,17 @@
                                        |  (multipart/form-data with image)
                                        v
 +---------------------------+     +------------------------------+
-|  Google Cloud Storage     |     |  Backend API (FastAPI)       |
-|  (GCS Bucket)             |<--->|  - /health, /solve           |
-|  - chess puzzle images    |     |  - Python, uvicorn           |
-|  - Optional: solutions    |     |  - Talks to GCS + OpenAI     |
+|  Optional Cloud Services  |     |  Backend API (FastAPI)       |
+|  (GCS / external APIs)    |<--->|  - /health, /solve           |
+|  - puzzle storage (opt)   |     |  - /auth, /assistant         |
+|  - platform integrations  |     |  - /puzzles/* analytics data |
 +-------------+-------------+     +------------------------------+
               ^                                   |
               |                                   |
-              |                                   | HTTPS (OpenAI API)
+              |                                   | HTTPS (AI API)
               |                                   v
               |                      +------------------------------+
-              |                      |     OpenAI Vision + GPT     |
+              |                      |     Gemini + Stockfish      |
               |                      |  - Reads chess puzzle image |
               |                      |  - Returns SAN moves        |
               |                      +------------------------------+
@@ -97,7 +97,7 @@ Expected response:
 
 ### Test routes
 - Local auth + solve flow: `http://localhost:3000/login-test`
-- Solve page: `http://localhost:3001/solve-test`
+- Solve page: `http://localhost:3000/solve-test`
 
 ## One-Command Startup (PowerShell)
 
