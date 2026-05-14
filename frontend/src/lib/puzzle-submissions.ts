@@ -315,8 +315,83 @@ export function replacePuzzleSubmissions(
     return [];
   }
 
+  const existing = readPuzzleSubmissions();
+  const existingImageById = new Map<string, string>();
+  const existingImageByAttemptId = new Map<string, string>();
+  const existingImageByFingerprint = new Map<string, string>();
+
+  const getSubmissionImageDataUrl = (value: PuzzleSubmissionRecord): string | null => {
+    if (
+      typeof value.originalPuzzleImageDataUrl === 'string' &&
+      value.originalPuzzleImageDataUrl.startsWith('data:image/')
+    ) {
+      return value.originalPuzzleImageDataUrl;
+    }
+    return null;
+  };
+
+  const getSubmissionAttemptId = (value: PuzzleSubmissionRecord): string | null => {
+    const candidate = value.firstMoveAssessment?.attemptId;
+    return typeof candidate === 'string' && candidate.trim().length > 0 ? candidate.trim() : null;
+  };
+
+  const buildSubmissionFingerprint = (value: PuzzleSubmissionRecord): string => {
+    const solveTimeSegment =
+      typeof value.solveTimeMs === 'number' && Number.isFinite(value.solveTimeMs)
+        ? String(Math.round(value.solveTimeMs))
+        : '';
+    const linesSegment = Array.isArray(value.solutionLines) ? value.solutionLines.join('|') : '';
+    return [
+      value.fileName.trim().toLowerCase(),
+      value.expectedSideToMove,
+      (value.fen ?? '').trim(),
+      solveTimeSegment,
+      linesSegment,
+    ].join('::');
+  };
+
+  for (const submission of existing) {
+    const imageDataUrl = getSubmissionImageDataUrl(submission);
+    if (!imageDataUrl) {
+      continue;
+    }
+
+    existingImageById.set(submission.id, imageDataUrl);
+
+    const attemptId = getSubmissionAttemptId(submission);
+    if (attemptId) {
+      existingImageByAttemptId.set(attemptId, imageDataUrl);
+    }
+
+    const fingerprint = buildSubmissionFingerprint(submission);
+    if (!existingImageByFingerprint.has(fingerprint)) {
+      existingImageByFingerprint.set(fingerprint, imageDataUrl);
+    }
+  }
+
   const normalized = submissions
     .filter(isSubmissionRecord)
+    .map((submission) => {
+      const incomingImage = getSubmissionImageDataUrl(submission);
+      if (incomingImage) {
+        return submission;
+      }
+
+      const attemptId = getSubmissionAttemptId(submission);
+      const mergedImage =
+        existingImageById.get(submission.id) ??
+        (attemptId ? existingImageByAttemptId.get(attemptId) : undefined) ??
+        existingImageByFingerprint.get(buildSubmissionFingerprint(submission));
+
+      if (!mergedImage) {
+        return submission;
+      }
+
+      return {
+        ...submission,
+        originalPuzzleImageDataUrl: mergedImage,
+      };
+    })
     .sort((a, b) => {
       const left = Date.parse(a.submittedAt);
       const right = Date.parse(b.submittedAt);

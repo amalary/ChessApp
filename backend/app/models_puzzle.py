@@ -24,6 +24,7 @@ class LocalAuthPuzzleSubmission(Base):
     puzzle_elo = Column(Integer, nullable=True)
     difficulty_rating = Column(Integer, nullable=True)
     estimated_difficulty_rating = Column(Integer, nullable=True)
+    original_puzzle_image_data_url = Column(Text, nullable=True)
     position_check = Column(JSON, nullable=True)
     solution_lines = Column(JSON, nullable=False, default=list)
     first_move_assessment = Column(JSON, nullable=True)

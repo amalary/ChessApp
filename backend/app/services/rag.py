@@ -42,7 +42,9 @@ def _get_database_url() -> str:
 
 @lru_cache(maxsize=1)
 def _get_genai_client() -> genai.Client:
-    api_key = _require_env("GOOGLE_API_KEY")
+    api_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY/GOOGLE_API_KEY is missing. Set it in backend/.env")
     return genai.Client(api_key=api_key)
 
 
@@ -59,7 +61,7 @@ def embed_query(query: str) -> list[float]:
         )
         return response.embeddings[0].values
     except Exception as exc:
-        raise EmbeddingServiceError("Failed to create query embedding.") from exc
+        raise EmbeddingServiceError(f"Failed to create query embedding: {exc}") from exc
 
 
 def retrieve_chunks(query: str, limit: int = 5) -> list[dict]:

@@ -278,6 +278,11 @@ def map_submission(submission: LocalAuthPuzzleSubmission) -> PuzzleSubmissionRes
     expected_side = submission.expected_side_to_move
     if expected_side not in {"white", "black"}:
         expected_side = "white"
+    original_image_data_url = getattr(
+        submission, "original_puzzle_image_data_url", None
+    )
+    if not isinstance(original_image_data_url, str):
+        original_image_data_url = None
 
     return PuzzleSubmissionResponse(
         id=str(submission.id),
@@ -297,6 +302,7 @@ def map_submission(submission: LocalAuthPuzzleSubmission) -> PuzzleSubmissionRes
                 else _resolve_difficulty_rating(submission)
             )
         ),
+        originalPuzzleImageDataUrl=original_image_data_url,
         positionCheck=_normalize_position_check(submission.position_check),
         solutionLines=(
             submission.solution_lines
@@ -340,3 +346,37 @@ def get_difficulty_bucket_analytics_for_user(
     puzzle_submissions.ensure_table(db)
     rows = puzzle_submissions.list_for_user(db=db, user_id=current_user.id, limit=limit)
     return build_difficulty_bucket_analytics(rows=rows)
+
+
+def build_submission_history_context_for_user(
+    *,
+    db: Session,
+    current_user: LocalAuthUser,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    submissions = list_submissions_for_user(
+        db=db,
+        current_user=current_user,
+        limit=max(1, min(limit, 500)),
+    )
+    context: list[dict[str, Any]] = []
+    for submission in submissions:
+        position_check = submission.positionCheck or {}
+        first_move_assessment = submission.firstMoveAssessment or {}
+        context.append(
+            {
+                "id": submission.id,
+                "fileName": submission.fileName,
+                "submittedAt": submission.submittedAt,
+                "fen": submission.fen,
+                "puzzleElo": submission.puzzleElo,
+                "difficultyRating": submission.difficultyRating,
+                "estimatedDifficultyRating": submission.estimatedDifficultyRating,
+                "mateIn": position_check.get("mateIn"),
+                "visionConfidence": position_check.get("confidence"),
+                "firstMoveCorrect": first_move_assessment.get("isFirstMoveCorrect"),
+                "firstMoveStatus": first_move_assessment.get("status"),
+                "solutionLines": submission.solutionLines,
+            }
+        )
+    return context

@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import logging
 import re
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
+from app.db_auth import get_db
+from app.models_auth import LocalAuthUser
 from app.services.agent_chat import (
     AgentDatabaseError,
     GeminiServiceError,
@@ -15,6 +19,10 @@ from app.services.agent_chat import (
     generate_rag_answer,
 )
 from app.services.rag import EmbeddingServiceError, RetrievalDatabaseError, retrieve_chunks
+from app.services.puzzle_submission_service import (
+    build_submission_history_context_for_user,
+)
+from app.services.user_context import build_agent_user_profile_context
 
 router = APIRouter(tags=["agent"])
 logger = logging.getLogger(__name__)
@@ -95,10 +103,43 @@ async def retrieve(request: RetrievalRequest) -> RetrievalResponse:
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(
+    request: ChatRequest,
+    db: Session = Depends(get_db),
+    x_local_auth_user_id: str | None = Header(
+        default=None, alias="X-Local-Auth-User-Id"
+    ),
+) -> ChatResponse:
     try:
         clean_query = _normalize_query_or_raise(request.query)
-        rag_result = generate_rag_answer(clean_query, request.limit)
+        history_context: list[dict] | None = None
+        user_profile_context: dict | None = None
+        local_auth_user: LocalAuthUser | None = None
+        if isinstance(x_local_auth_user_id, str) and x_local_auth_user_id.strip():
+            try:
+                local_user_uuid = UUID(x_local_auth_user_id.strip())
+                local_auth_user = db.get(LocalAuthUser, local_user_uuid)
+            except ValueError:
+                local_auth_user = None
+        if local_auth_user is not None:
+            try:
+                history_context = build_submission_history_context_for_user(
+                    db=db,
+                    current_user=local_auth_user,
+                    limit=200,
+                )
+            except Exception as exc:
+                logger.warning("agent_chat history lookup failed: %s", exc)
+                history_context = None
+            user_profile_context = build_agent_user_profile_context(
+                local_auth_user=local_auth_user
+            )
+        rag_result = generate_rag_answer(
+            clean_query,
+            request.limit,
+            user_puzzle_history=history_context,
+            user_profile_context=user_profile_context,
+        )
     except QueryValidationError as exc:
         raise HTTPException(
             status_code=400,
@@ -115,6 +156,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
             detail={"code": "gemini_api_error", "message": str(exc)},
         ) from exc
     except Exception as exc:
+        logger.exception("agent_chat unhandled error: %s", exc)
         raise HTTPException(
             status_code=500,
             detail={

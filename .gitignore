@@ -1,5 +1,9 @@
 # Local secrets and service-account files
 .env
+backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
 sa.json
 keys/
 backend/sa.json

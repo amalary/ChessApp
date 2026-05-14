@@ -2,13 +2,16 @@ import os
 import re
 import shutil
 import logging
+import base64
 from datetime import datetime
+from io import BytesIO
 from time import perf_counter
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import chess
 import redis.asyncio as redis
+from PIL import Image
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -60,6 +63,7 @@ def _load_env_file(
     *,
     override_existing: bool = False,
     override_keys: set[str] | None = None,
+    skip_keys: set[str] | None = None,
 ) -> None:
     if not path.exists() or not path.is_file():
         return
@@ -74,6 +78,8 @@ def _load_env_file(
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip().strip("\"'")
+        if skip_keys and key in skip_keys:
+            continue
         should_override = bool(override_keys and key in override_keys)
         if key and (
             key not in os.environ or override_existing or should_override
@@ -98,7 +104,8 @@ def _bootstrap_env() -> None:
     for env_path in candidates:
         if env_path.exists() and env_path.resolve() == backend_env_resolved:
             continue
-        _load_env_file(env_path)
+        # Keep sensitive runtime wiring (API/database keys) sourced from backend/.env.
+        _load_env_file(env_path, skip_keys=ENV_OVERRIDE_KEYS)
 
     if "GOOGLE_API_KEY" not in os.environ and "GEMINI_API_KEY" in os.environ:
         os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]
@@ -269,6 +276,31 @@ def _resolve_stockfish_path_or_raise() -> str:
     raise HTTPException(status_code=500, detail=STOCKFISH_NOT_FOUND_DETAIL)
 
 
+def _create_submission_image_data_url(image_bytes: bytes) -> str | None:
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            normalized = image.convert("RGB")
+            max_dimension = 320
+            largest_dimension = max(normalized.width, normalized.height)
+            if largest_dimension > max_dimension:
+                scale = max_dimension / float(largest_dimension)
+                target_width = max(1, int(round(normalized.width * scale)))
+                target_height = max(1, int(round(normalized.height * scale)))
+                resampling = (
+                    Image.Resampling.LANCZOS
+                    if hasattr(Image, "Resampling")
+                    else Image.LANCZOS
+                )
+                normalized = normalized.resize((target_width, target_height), resampling)
+
+            with BytesIO() as output:
+                normalized.save(output, format="JPEG", quality=80, optimize=True)
+                encoded = base64.b64encode(output.getvalue()).decode("ascii")
+                return f"data:image/jpeg;base64,{encoded}"
+    except Exception:
+        return None
+
+
 def _persist_local_auth_submission(
     *,
     db: Session,
@@ -312,6 +344,7 @@ def _persist_local_auth_submission(
         if isinstance(difficulty_rating, int) and 100 <= difficulty_rating <= 4000
         else None
     )
+    original_puzzle_image_data_url = _create_submission_image_data_url(upload.data)
     create_submission_for_user(
         db=db,
         payload=PuzzleSubmissionCreate(
@@ -323,6 +356,7 @@ def _persist_local_auth_submission(
             puzzle_elo=normalized_difficulty_rating or estimated_difficulty_rating,
             difficulty_rating=normalized_difficulty_rating,
             estimated_difficulty_rating=estimated_difficulty_rating,
+            original_puzzle_image_data_url=original_puzzle_image_data_url,
             position_check={
                 "sideToMove": gemini_result.get("side_to_move"),
                 "confidence": confidence,

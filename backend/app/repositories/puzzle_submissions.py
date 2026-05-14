@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.models_puzzle import LocalAuthPuzzleSubmission
@@ -19,6 +19,7 @@ class PuzzleSubmissionCreate:
     puzzle_elo: int | None
     difficulty_rating: int | None
     estimated_difficulty_rating: int | None
+    original_puzzle_image_data_url: str | None
     position_check: dict
     solution_lines: list[str]
     first_move_assessment: dict | None
@@ -26,6 +27,27 @@ class PuzzleSubmissionCreate:
 
 def ensure_table(db: Session) -> None:
     LocalAuthPuzzleSubmission.__table__.create(bind=db.get_bind(), checkfirst=True)
+    # Backward-compatibility guard: older local DBs may have the table but miss
+    # newly introduced nullable columns. Add them lazily to avoid runtime 500s.
+    db.execute(
+        text(
+            "ALTER TABLE local_auth_puzzle_submissions "
+            "ADD COLUMN IF NOT EXISTS difficulty_rating INTEGER"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE local_auth_puzzle_submissions "
+            "ADD COLUMN IF NOT EXISTS estimated_difficulty_rating INTEGER"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE local_auth_puzzle_submissions "
+            "ADD COLUMN IF NOT EXISTS original_puzzle_image_data_url TEXT"
+        )
+    )
+    db.commit()
 
 
 def list_for_user(
@@ -57,6 +79,7 @@ def create_submission(
         puzzle_elo=payload.puzzle_elo,
         difficulty_rating=payload.difficulty_rating,
         estimated_difficulty_rating=payload.estimated_difficulty_rating,
+        original_puzzle_image_data_url=payload.original_puzzle_image_data_url,
         position_check=payload.position_check,
         solution_lines=payload.solution_lines,
         first_move_assessment=payload.first_move_assessment,

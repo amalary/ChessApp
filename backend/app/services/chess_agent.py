@@ -99,6 +99,8 @@ class ChessAssistantState(TypedDict, total=False):
     guardrail_triggered: bool
     guardrail_reason: str | None
     checkmate_verified: bool
+    user_puzzle_history: list[dict[str, Any]]
+    user_profile_context: dict[str, Any] | None
 
 
 @dataclass
@@ -132,6 +134,8 @@ class ChessAssistantAgent:
         solver_line: list[str] | None,
         user_message: str,
         requested_mode: str,
+        user_puzzle_history: list[dict[str, Any]] | None = None,
+        user_profile_context: dict[str, Any] | None = None,
     ) -> ChessAssistantState:
         mode = requested_mode.strip().lower() if isinstance(requested_mode, str) else ""
         if mode not in ALLOWED_MODES:
@@ -169,6 +173,10 @@ class ChessAssistantAgent:
             "guardrail_triggered": False,
             "guardrail_reason": None,
             "checkmate_verified": False,
+            "user_puzzle_history": user_puzzle_history or [],
+            "user_profile_context": (
+                user_profile_context if isinstance(user_profile_context, dict) else None
+            ),
         }
         result = self.graph.invoke(initial_state)
         return cast(ChessAssistantState, result)
@@ -235,6 +243,16 @@ class ChessAssistantAgent:
             "solver_move_san": (state.get("solver_move_san") or "").strip() or None,
             "fen": (state.get("fen") or "").strip() or None,
             "solver_line": [move for move in state.get("solver_line", []) if move],
+            "user_puzzle_history": [
+                item
+                for item in state.get("user_puzzle_history", [])
+                if isinstance(item, dict)
+            ],
+            "user_profile_context": (
+                state.get("user_profile_context")
+                if isinstance(state.get("user_profile_context"), dict)
+                else None
+            ),
         }
 
     def detect_prompt_injection(
@@ -292,6 +310,7 @@ class ChessAssistantAgent:
         if state.get("guardrail_triggered"):
             return state
 
+        hydrated_state = self._hydrate_context_from_history(state)
         mode = state.get("requested_mode", "followup")
         message = state.get("user_message", "").lower()
         asks_only_app_help = any(topic in message for topic in APP_FEATURE_HELP)
@@ -301,21 +320,63 @@ class ChessAssistantAgent:
         )
 
         if not requires_position:
-            return state
+            return hydrated_state
 
-        if not state.get("fen"):
+        if not hydrated_state.get("fen"):
             return self._helpful_missing_context(
-                state,
+                hydrated_state,
                 reason="missing_fen",
                 message="Please solve or upload a puzzle first so I have a FEN to analyze.",
             )
 
-        if not state.get("solver_move_san") and not state.get("solver_line"):
+        if not hydrated_state.get("solver_move_san") and not hydrated_state.get(
+            "solver_line"
+        ):
             return self._helpful_missing_context(
-                state,
+                hydrated_state,
                 reason="missing_solver_output",
                 message="Please solve a puzzle first so I can explain the verified best move and line.",
             )
+
+        return hydrated_state
+
+    def _hydrate_context_from_history(
+        self, state: ChessAssistantState
+    ) -> ChessAssistantState:
+        # If the client did not provide live puzzle context, reuse the latest
+        # stored solved puzzle for this local account when available.
+        if state.get("fen") and (
+            state.get("solver_move_san") or state.get("solver_line")
+        ):
+            return state
+
+        history = state.get("user_puzzle_history", [])
+        if not isinstance(history, list):
+            return state
+
+        for item in history:
+            if not isinstance(item, dict):
+                continue
+            fen = item.get("fen")
+            if not isinstance(fen, str) or not fen.strip():
+                continue
+
+            solution_lines_raw = item.get("solutionLines")
+            solution_lines: list[str] = []
+            if isinstance(solution_lines_raw, list):
+                solution_lines = [
+                    move.strip()
+                    for move in solution_lines_raw
+                    if isinstance(move, str) and move.strip()
+                ]
+
+            solver_move_san = solution_lines[0] if solution_lines else None
+            return {
+                **state,
+                "fen": state.get("fen") or fen.strip(),
+                "solver_move_san": state.get("solver_move_san") or solver_move_san,
+                "solver_line": state.get("solver_line") or solution_lines,
+            }
 
         return state
 
@@ -482,7 +543,55 @@ class ChessAssistantAgent:
             return state
 
         message = state.get("user_message", "")
+        lowered_message = message.lower()
         fen = state.get("fen")
+        asks_history = any(
+            keyword in lowered_message
+            for keyword in (
+                "history",
+                "recent puzzles",
+                "recent puzzle",
+                "last puzzle",
+                "last puzzles",
+                "accuracy trend",
+                "rating trend",
+                "my solves",
+            )
+        )
+        asks_profile = any(
+            keyword in lowered_message
+            for keyword in (
+                "my profile",
+                "my account",
+                "my username",
+                "my email",
+                "who am i",
+            )
+        )
+        if asks_history:
+            history = self._run_tool(
+                "retrieve_user_puzzle_history",
+                history=state.get("user_puzzle_history", []),
+                limit=10,
+            )
+            if history:
+                summary = self._build_history_summary(history)
+                return {
+                    **state,
+                    "response_text": summary,
+                    "confidence": 0.84,
+                }
+            return {
+                **state,
+                "response_text": "I do not see stored puzzle history for this local account yet. Solve a few puzzles first and try again.",
+                "confidence": 0.9,
+            }
+        if asks_profile:
+            return {
+                **state,
+                "response_text": self._build_profile_summary(state),
+                "confidence": 0.9,
+            }
 
         referenced_token = _first_move_token(message)
         if referenced_token and fen and state.get("board_valid"):
@@ -519,6 +628,80 @@ class ChessAssistantAgent:
             "response_text": followup_text,
             "confidence": 0.62,
         }
+
+    def _build_history_summary(self, history: list[dict[str, Any]]) -> str:
+        total = len(history)
+        solved = 0
+        first_move_correct = 0
+        first_move_total = 0
+        ratings: list[int] = []
+        latest = history[0]
+
+        for item in history:
+            mate_in = item.get("mateIn")
+            if isinstance(mate_in, int):
+                solved += 1
+            rating = item.get("difficultyRating") or item.get("puzzleElo")
+            if isinstance(rating, int):
+                ratings.append(rating)
+            first_move = item.get("firstMoveCorrect")
+            if isinstance(first_move, bool):
+                first_move_total += 1
+                if first_move:
+                    first_move_correct += 1
+
+        avg_rating = round(sum(ratings) / len(ratings)) if ratings else None
+        first_move_accuracy = (
+            round((first_move_correct / first_move_total) * 100, 1)
+            if first_move_total > 0
+            else None
+        )
+        latest_name = str(latest.get("fileName", "recent puzzle"))
+        latest_rating = latest.get("difficultyRating") or latest.get("puzzleElo")
+
+        parts = [
+            f"I found {total} stored puzzles for your local account.",
+            f"Most recent: {latest_name} (rating {latest_rating}).",
+            f"Solved mates recorded: {solved}.",
+        ]
+        if avg_rating is not None:
+            parts.append(f"Average puzzle rating: {avg_rating}.")
+        if first_move_accuracy is not None:
+            parts.append(f"First-move accuracy: {first_move_accuracy}%.")
+        return " ".join(parts)
+
+    def _build_profile_summary(self, state: ChessAssistantState) -> str:
+        profile = state.get("user_profile_context")
+        if not isinstance(profile, dict):
+            return "I do not see profile details for this user in the current context."
+
+        local_profile = profile.get("local_profile")
+        auth_profile = profile.get("auth_profile")
+
+        summary_parts: list[str] = []
+        if isinstance(local_profile, dict):
+            username = local_profile.get("username")
+            email = local_profile.get("email")
+            created_at = local_profile.get("created_at")
+            if isinstance(username, str) and username.strip():
+                summary_parts.append(f"Username: {username.strip()}.")
+            if isinstance(email, str) and email.strip():
+                summary_parts.append(f"Email: {email.strip()}.")
+            if isinstance(created_at, str) and created_at.strip():
+                summary_parts.append(f"Account created at: {created_at.strip()}.")
+
+        if isinstance(auth_profile, dict):
+            display_name = auth_profile.get("name") or auth_profile.get("nickname")
+            if isinstance(display_name, str) and display_name.strip():
+                summary_parts.append(f"Display name: {display_name.strip()}.")
+
+        history = state.get("user_puzzle_history", [])
+        if isinstance(history, list):
+            summary_parts.append(f"Stored puzzle records: {len(history)}.")
+
+        if not summary_parts:
+            return "I only have limited non-private profile data right now."
+        return " ".join(summary_parts)
 
     def validate_response(self, state: ChessAssistantState) -> ChessAssistantState:
         response_text = state.get("response_text", "").strip()
@@ -726,8 +909,15 @@ class ChessAssistantAgent:
         )
 
     def _tool_retrieve_user_puzzle_history(self, payload: dict[str, Any]) -> list[Any]:
-        _ = payload
-        return []
+        history = payload.get("history")
+        if not isinstance(history, list):
+            return []
+        limit = payload.get("limit", 10)
+        try:
+            normalized_limit = max(1, min(int(limit), 100))
+        except Exception:
+            normalized_limit = 10
+        return [item for item in history if isinstance(item, dict)][:normalized_limit]
 
     def _classify_theme_from_position(
         self,

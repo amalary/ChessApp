@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.errors import install_api_error_handlers
+from app.db_auth import get_db
+from app.models_auth import LocalAuthUser
 from app.routes.agent import router
 from app.services.agent_chat import FALLBACK_ANSWER, GeminiServiceError
 
@@ -16,6 +20,12 @@ class AgentRoutesGuardrailsTests(unittest.TestCase):
         app = FastAPI()
         install_api_error_handlers(app)
         app.include_router(router, prefix="/agent")
+        self.fake_db = SimpleNamespace(get=lambda *_args, **_kwargs: None)
+
+        def _override_get_db():
+            yield self.fake_db
+
+        app.dependency_overrides[get_db] = _override_get_db
         self.client = TestClient(app, raise_server_exceptions=False)
 
     def test_chat_rejects_empty_query_with_400(self) -> None:
@@ -51,6 +61,43 @@ class AgentRoutesGuardrailsTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["answer"], FALLBACK_ANSWER)
         self.assertNotIn("sources", payload)
+
+    @patch("app.routes.agent.build_submission_history_context_for_user")
+    @patch("app.routes.agent.generate_rag_answer")
+    def test_chat_passes_sanitized_user_profile_context(
+        self,
+        mock_generate_rag_answer,
+        mock_build_history,
+    ) -> None:
+        user_id = uuid4()
+        local_auth_user = LocalAuthUser(
+            id=user_id,
+            username="player-one",
+            email="player@example.com",
+            password_hash="do-not-expose",
+        )
+        self.fake_db.get = lambda *_args, **_kwargs: local_auth_user
+        mock_build_history.return_value = []
+        mock_generate_rag_answer.return_value = {"answer": "ok"}
+
+        response = self.client.post(
+            "/agent/chat",
+            json={"query": "What is my profile data?"},
+            headers={"X-Local-Auth-User-Id": str(user_id)},
+        )
+        self.assertEqual(response.status_code, 200)
+        profile_context = mock_generate_rag_answer.call_args.kwargs[
+            "user_profile_context"
+        ]
+        self.assertEqual(
+            profile_context["local_profile"]["username"],
+            "player-one",
+        )
+        self.assertEqual(
+            profile_context["local_profile"]["email"],
+            "player@example.com",
+        )
+        self.assertNotIn("password_hash", profile_context["local_profile"])
 
 
 if __name__ == "__main__":

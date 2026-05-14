@@ -1347,6 +1347,7 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${token}`,
+              ...(localAuthUserId ? { 'X-Local-Auth-User-Id': localAuthUserId } : {}),
             },
             body: JSON.stringify(assistantPayload),
           });
@@ -1651,6 +1652,7 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
     try {
       const token = await getAccessTokenClient();
       const currentFen = boardToFen(sandboxBoard, sandboxSideToMove);
+      const localAuthUserId = readActiveLocalAuthUser()?.id ?? null;
 
       if (!token) {
         setSandboxHint('No Auth0 token found, so fallback hint: look for forcing checks and captures from the highest-value attacker.');
@@ -1671,6 +1673,7 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
+          ...(localAuthUserId ? { 'X-Local-Auth-User-Id': localAuthUserId } : {}),
         },
         body: JSON.stringify(payload),
       });

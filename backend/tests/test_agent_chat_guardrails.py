@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.services import agent_chat
+from app.services.rag import EmbeddingServiceError
 
 
 class AgentChatGuardrailsTests(unittest.TestCase):
@@ -27,6 +28,33 @@ class AgentChatGuardrailsTests(unittest.TestCase):
         result = agent_chat.generate_rag_answer("How do I use settings?")
         self.assertEqual(result["answer"], agent_chat.FALLBACK_ANSWER)
         mock_get_client.assert_not_called()
+
+    @patch("app.services.agent_chat.retrieve_chunks", return_value=[])
+    @patch("app.services.agent_chat._get_chat_client")
+    def test_uses_history_when_retrieval_empty(
+        self,
+        mock_get_client: MagicMock,
+        _mock_retrieve: MagicMock,
+    ) -> None:
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text="Your latest upload was puzzle.png with mate in 2."
+        )
+        mock_get_client.return_value = mock_client
+
+        result = agent_chat.generate_rag_answer(
+            "What was my latest puzzle?",
+            user_puzzle_history=[
+                {
+                    "fileName": "puzzle.png",
+                    "submittedAt": "2026-05-13T15:00:00Z",
+                    "mateIn": 2,
+                    "solutionLines": ["Qh7+ Kg8 Qh8#"],
+                }
+            ],
+        )
+        self.assertIn("latest", result["answer"].lower())
+        mock_get_client.assert_called_once()
 
     @patch("app.services.agent_chat.retrieve_chunks")
     @patch("app.services.agent_chat._get_chat_client")
@@ -66,7 +94,7 @@ class AgentChatGuardrailsTests(unittest.TestCase):
 
     @patch("app.services.agent_chat.retrieve_chunks")
     @patch("app.services.agent_chat._get_chat_client")
-    def test_maps_generation_failure_to_gemini_error(
+    def test_raises_when_generation_unavailable_by_default(
         self,
         mock_get_client: MagicMock,
         mock_retrieve: MagicMock,
@@ -85,6 +113,90 @@ class AgentChatGuardrailsTests(unittest.TestCase):
 
         with self.assertRaises(agent_chat.GeminiServiceError):
             agent_chat.generate_rag_answer("Where is settings?")
+
+    @patch("app.services.agent_chat.retrieve_chunks")
+    @patch("app.services.agent_chat._get_chat_client")
+    def test_fallback_when_generation_unavailable_in_fail_open_mode(
+        self,
+        mock_get_client: MagicMock,
+        mock_retrieve: MagicMock,
+    ) -> None:
+        mock_retrieve.return_value = [
+            {
+                "source_file": "docs/settings.md",
+                "chunk_index": 0,
+                "chunk_text": "Use the settings page.",
+                "distance": 0.05,
+            }
+        ]
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = RuntimeError("boom")
+        mock_get_client.return_value = mock_client
+
+        with patch.dict(
+            os.environ, {"AGENT_FAIL_OPEN_ON_GEMINI_ERRORS": "true"}, clear=False
+        ):
+            result = agent_chat.generate_rag_answer("Where is settings?")
+        self.assertEqual(
+            result["answer"], agent_chat.GENERATION_UNAVAILABLE_ANSWER
+        )
+
+    @patch("app.services.agent_chat.retrieve_chunks")
+    @patch("app.services.agent_chat._get_chat_client")
+    def test_raises_when_embedding_unavailable_by_default(
+        self,
+        mock_get_client: MagicMock,
+        mock_retrieve: MagicMock,
+    ) -> None:
+        mock_retrieve.side_effect = EmbeddingServiceError("embed down")
+        with self.assertRaises(agent_chat.GeminiServiceError):
+            agent_chat.generate_rag_answer("hello")
+
+    @patch("app.services.agent_chat.retrieve_chunks")
+    @patch("app.services.agent_chat._get_chat_client")
+    def test_fallback_when_embedding_unavailable_in_fail_open_mode(
+        self,
+        mock_get_client: MagicMock,
+        mock_retrieve: MagicMock,
+    ) -> None:
+        mock_retrieve.side_effect = EmbeddingServiceError("embed down")
+        with patch.dict(
+            os.environ, {"AGENT_FAIL_OPEN_ON_GEMINI_ERRORS": "true"}, clear=False
+        ):
+            result = agent_chat.generate_rag_answer("hello")
+        self.assertEqual(
+            result["answer"], agent_chat.EMBEDDING_UNAVAILABLE_ANSWER
+        )
+        mock_get_client.assert_not_called()
+
+    @patch("app.services.agent_chat.retrieve_chunks")
+    @patch("app.services.agent_chat._get_chat_client")
+    def test_raises_when_retrieval_configuration_missing_by_default(
+        self,
+        mock_get_client: MagicMock,
+        mock_retrieve: MagicMock,
+    ) -> None:
+        mock_retrieve.side_effect = RuntimeError("DATABASE_URL is missing")
+        with self.assertRaises(agent_chat.GeminiServiceError):
+            agent_chat.generate_rag_answer("hello")
+        mock_get_client.assert_not_called()
+
+    @patch("app.services.agent_chat.retrieve_chunks")
+    @patch("app.services.agent_chat._get_chat_client")
+    def test_fallback_when_retrieval_configuration_missing_in_fail_open_mode(
+        self,
+        mock_get_client: MagicMock,
+        mock_retrieve: MagicMock,
+    ) -> None:
+        mock_retrieve.side_effect = RuntimeError("DATABASE_URL is missing")
+        with patch.dict(
+            os.environ, {"AGENT_FAIL_OPEN_ON_GEMINI_ERRORS": "true"}, clear=False
+        ):
+            result = agent_chat.generate_rag_answer("hello")
+        self.assertEqual(
+            result["answer"], agent_chat.EMBEDDING_UNAVAILABLE_ANSWER
+        )
+        mock_get_client.assert_not_called()
 
     @patch("app.services.agent_chat.retrieve_chunks")
     @patch("app.services.agent_chat._get_chat_client")

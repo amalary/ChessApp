@@ -1,3 +1,5 @@
+import { readActiveLocalAuthUser } from '@/lib/dashboard-theme-settings';
+
 export type AgentChatResponse = {
   query: string;
   answer: string;
@@ -67,13 +69,18 @@ export async function requestAgentChat({
   }
 
   const rootUrl = backendUrl ?? process.env.NEXT_PUBLIC_BACKEND_URL ?? DEFAULT_BACKEND_URL;
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+  };
+  const localAuthUserId = readActiveLocalAuthUser()?.id ?? null;
+  if (localAuthUserId) {
+    headers['X-Local-Auth-User-Id'] = localAuthUserId;
+  }
   let response: Response;
   try {
     response = await fetch(`${rootUrl}/agent/chat`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({ query: normalizedQuery, limit }),
       signal,
     });

@@ -145,6 +145,25 @@ class ChessAssistantAgentTests(unittest.TestCase):
         )
         self.assertIn("cannot verify checkmate", result["response_text"].lower())
 
+    def test_profile_followup_uses_non_private_context(self) -> None:
+        result = assistant_agent.run(
+            user_id="user-1",
+            puzzle_id=None,
+            fen=None,
+            solver_move_san=None,
+            solver_line=None,
+            user_message="What is my profile and email?",
+            requested_mode="followup",
+            user_profile_context={
+                "local_profile": {
+                    "username": "player-one",
+                    "email": "player@example.com",
+                }
+            },
+        )
+        self.assertIn("player-one", result["response_text"])
+        self.assertIn("player@example.com", result["response_text"])
+
 
 if __name__ == "__main__":
     unittest.main()
