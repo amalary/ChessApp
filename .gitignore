@@ -15,3 +15,6 @@ GCS_BUCKET=your-bucket-name-here
 GCP_PROJECT_ID=chessapp-477519
 chessapp-477519-f3f4cd22fc7e.json
 cloud-sql-proxy*.exe
+
+# Runtime logs/process metadata
+.runlogs/
