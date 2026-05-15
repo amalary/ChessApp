@@ -38,6 +38,12 @@ import {
   SolveMeta,
   SolveResponse,
 } from './solve-test-utils';
+import {
+  buildBeatScheduleMs,
+  buildConversationalBeats,
+  formatConversationalText,
+  type AssistantRhythmIntent,
+} from '@/lib/assistant-rhythm';
 
 const DASHBOARD_ACCENT_STORAGE_KEY = 'chessapp.dashboard.accent';
 const DASHBOARD_SECONDARY_STORAGE_KEY = 'chessapp.dashboard.secondary';
@@ -45,6 +51,7 @@ const DASHBOARD_GRADIENT_ENABLED_STORAGE_KEY = 'chessapp.dashboard.gradient.enab
 const DASHBOARD_GRADIENT_DIRECTION_STORAGE_KEY = 'chessapp.dashboard.gradient.direction';
 const DASHBOARD_THEME_MODE_STORAGE_KEY = 'chessapp.dashboard.theme.mode';
 const DASHBOARD_THEME_UPDATED_EVENT = 'chessapp.dashboard.theme.updated';
+const AMY_CONVERSATION_MODE_STORAGE_KEY = 'chessapp.solve-test.amy.conversation-mode';
 const FIRST_MOVE_MIN_CONFIDENCE = 0.75;
 const BOARD_FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const;
 const BOARD_RANKS = ['8', '7', '6', '5', '4', '3', '2', '1'] as const;
@@ -57,12 +64,185 @@ type FirstMoveAttempt = {
   createdAt: string;
 };
 
+type BoardPoint = {
+  x: number;
+  y: number;
+};
+
+type MoveSquares = {
+  sourceSquare: string;
+  destinationSquare: string;
+};
+
 type FirstMoveSolveOutcome = {
   status: FirstMoveAssessmentStatus;
   isFirstMoveCorrect: boolean;
   bestMove: string | null;
   isValidForFirstMoveAccuracy: boolean;
   invalidReason: string | null;
+};
+
+type AmyAssistantPhase = 'idle' | 'thinking' | 'analyzing' | 'coaching' | 'responding';
+type AmyConversationMode = 'coach' | 'rival' | 'grandmaster' | 'club_friend' | 'minimal';
+
+type AmyModeRhythm = {
+  beatIntent: AssistantRhythmIntent;
+  scheduleIntent: AssistantRhythmIntent;
+  maxBeats: number;
+  beatOffsetMs: number;
+  phaseIntervalMs: number;
+};
+
+type AmyModeConfig = {
+  label: string;
+  modeIndicator: string;
+  phaseLabels: Record<AmyAssistantPhase, string>;
+  emotionalStates: Record<AmyAssistantPhase, string>;
+  rhythm: AmyModeRhythm;
+};
+
+type AmyCueInput = {
+  solveSucceeded: boolean;
+  firstMoveStatus: FirstMoveAssessmentStatus;
+  bestMove: string | null;
+  meta: SolveMeta;
+};
+
+const AMY_PHASE_ROTATION: AmyAssistantPhase[] = ['thinking', 'analyzing', 'coaching'];
+const AMY_CONVERSATION_MODE_ORDER: AmyConversationMode[] = [
+  'coach',
+  'rival',
+  'grandmaster',
+  'club_friend',
+  'minimal',
+];
+
+const AMY_MODE_CONFIG: Record<AmyConversationMode, AmyModeConfig> = {
+  coach: {
+    label: 'Coach',
+    modeIndicator: 'Coach mode active',
+    phaseLabels: {
+      idle: 'Coach mode active.',
+      thinking: 'Calibrating your next training cue...',
+      analyzing: 'Amy is analyzing tactical pressure...',
+      coaching: 'Amy is shaping a practical plan...',
+      responding: 'Amy is delivering your next cue...',
+    },
+    emotionalStates: {
+      idle: 'Amy is focused',
+      thinking: 'Reviewing your patterns',
+      analyzing: 'Analyzing tactical pressure',
+      coaching: 'Balancing confidence and precision',
+      responding: 'Guiding your next decision',
+    },
+    rhythm: {
+      beatIntent: 'hint',
+      scheduleIntent: 'hint',
+      maxBeats: 4,
+      beatOffsetMs: 170,
+      phaseIntervalMs: 1500,
+    },
+  },
+  rival: {
+    label: 'Rival',
+    modeIndicator: 'Rival mode active',
+    phaseLabels: {
+      idle: 'Rival mode active.',
+      thinking: 'Measuring your tactical speed...',
+      analyzing: 'Amy is testing move-order discipline...',
+      coaching: 'Amy is preparing a hard verdict...',
+      responding: 'Amy is calling the line directly...',
+    },
+    emotionalStates: {
+      idle: 'Amy is focused',
+      thinking: 'Tracking decision speed',
+      analyzing: 'Analyzing tactical pressure',
+      coaching: 'Reviewing your patterns',
+      responding: 'Applying competitive pressure',
+    },
+    rhythm: {
+      beatIntent: 'hint',
+      scheduleIntent: 'hint',
+      maxBeats: 3,
+      beatOffsetMs: 120,
+      phaseIntervalMs: 1250,
+    },
+  },
+  grandmaster: {
+    label: 'Grandmaster',
+    modeIndicator: 'Grandmaster mode active',
+    phaseLabels: {
+      idle: 'Grandmaster mode active.',
+      thinking: 'Pruning non-forcing branches...',
+      analyzing: 'Amy is evaluating forcing continuations...',
+      coaching: 'Amy is condensing principal variation...',
+      responding: 'Amy is presenting the critical line...',
+    },
+    emotionalStates: {
+      idle: 'Amy is focused',
+      thinking: 'Filtering practical noise',
+      analyzing: 'Analyzing tactical pressure',
+      coaching: 'Reviewing your patterns',
+      responding: 'Enforcing forcing-line clarity',
+    },
+    rhythm: {
+      beatIntent: 'hint',
+      scheduleIntent: 'hint',
+      maxBeats: 3,
+      beatOffsetMs: 140,
+      phaseIntervalMs: 1700,
+    },
+  },
+  club_friend: {
+    label: 'Club Friend',
+    modeIndicator: 'Club Friend mode active',
+    phaseLabels: {
+      idle: 'Club Friend mode active.',
+      thinking: 'Reading the position with you...',
+      analyzing: 'Amy is checking tactical pressure...',
+      coaching: 'Amy is shaping a friendly plan...',
+      responding: 'Amy is sharing the next idea...',
+    },
+    emotionalStates: {
+      idle: 'Amy is focused',
+      thinking: 'Reviewing your patterns',
+      analyzing: 'Analyzing tactical pressure',
+      coaching: 'Building practical confidence',
+      responding: 'Keeping the rhythm relaxed',
+    },
+    rhythm: {
+      beatIntent: 'chat',
+      scheduleIntent: 'chat',
+      maxBeats: 5,
+      beatOffsetMs: 180,
+      phaseIntervalMs: 1550,
+    },
+  },
+  minimal: {
+    label: 'Minimal',
+    modeIndicator: 'Minimal mode active',
+    phaseLabels: {
+      idle: 'Minimal mode active.',
+      thinking: 'Selecting only essentials...',
+      analyzing: 'Amy is filtering tactical priorities...',
+      coaching: 'Amy is reducing to one actionable cue...',
+      responding: 'Amy is sending concise guidance...',
+    },
+    emotionalStates: {
+      idle: 'Amy is focused',
+      thinking: 'Prioritizing one clean line',
+      analyzing: 'Analyzing tactical pressure',
+      coaching: 'Reviewing your patterns',
+      responding: 'Minimizing noise',
+    },
+    rhythm: {
+      beatIntent: 'status',
+      scheduleIntent: 'status',
+      maxBeats: 2,
+      beatOffsetMs: 80,
+      phaseIntervalMs: 1100,
+    },
+  },
 };
 
 function loadImageFromObjectUrl(objectUrl: string): Promise<HTMLImageElement> {
@@ -145,6 +325,22 @@ function squareFromBoardIndex(row: number, col: number): string {
   return `${BOARD_FILES[col]}${BOARD_RANKS[row]}`;
 }
 
+function getSquareCenterPoint(square: string): BoardPoint | null {
+  if (!/^[a-h][1-8]$/.test(square)) {
+    return null;
+  }
+  const fileIndex = BOARD_FILES.indexOf(square[0] as (typeof BOARD_FILES)[number]);
+  const rank = Number(square[1]);
+  const rowIndex = 8 - rank;
+  if (fileIndex < 0 || rowIndex < 0 || rowIndex > 7) {
+    return null;
+  }
+  return {
+    x: ((fileIndex + 0.5) / 8) * 100,
+    y: ((rowIndex + 0.5) / 8) * 100,
+  };
+}
+
 function normalizeUciMove(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null;
@@ -167,6 +363,17 @@ function extractFirstUciMove(data: SolveResponse): string | null {
     }
   }
   return null;
+}
+
+function extractMoveSquares(moveUci: string | null): MoveSquares | null {
+  const normalized = normalizeUciMove(moveUci);
+  if (!normalized) {
+    return null;
+  }
+  return {
+    sourceSquare: normalized.slice(0, 2),
+    destinationSquare: normalized.slice(2, 4),
+  };
 }
 
 function isValidFenString(value: unknown): boolean {
@@ -240,6 +447,94 @@ function classifyFirstMove(
   return { status: 'incorrect', isFirstMoveCorrect: false };
 }
 
+function buildAmyCue(input: AmyCueInput, mode: AmyConversationMode): string {
+  if (mode === 'minimal') {
+    if (!input.solveSucceeded) {
+      return 'Recheck board.';
+    }
+    if (input.firstMoveStatus === 'correct') {
+      return input.meta.mateFound === true ? 'Right first move. Force checks.' : 'Correct first move.';
+    }
+    if (input.firstMoveStatus === 'almost_correct') {
+      return 'Close. Move order.';
+    }
+    if (input.bestMove) {
+      return `Key move: ${input.bestMove}.`;
+    }
+    return 'Checks first.';
+  }
+
+  if (!input.solveSucceeded) {
+    if (mode === 'rival') {
+      return 'You rushed the read. Recheck crop and side to move, then solve again.';
+    }
+    if (mode === 'grandmaster') {
+      return 'Position input is unstable. Verify side to move and board clarity before calculation.';
+    }
+    if (mode === 'club_friend') {
+      return 'Position read looks off. Let us clean the crop and retry together.';
+    }
+    return 'You are close. This position still looks unstable. Recheck crop and side to move, then run it again.';
+  }
+
+  if (input.firstMoveStatus === 'correct') {
+    if (mode === 'rival') {
+      return 'You found the right move. Convert without drift.';
+    }
+    if (mode === 'grandmaster') {
+      return input.meta.mateFound === true
+        ? 'Correct first move. Only forcing continuations preserve the win.'
+        : 'Correct first move. Convert by prioritizing forcing tempo.';
+    }
+    if (mode === 'club_friend') {
+      return input.meta.mateFound === true
+        ? 'Nice read. First move is right, now keep it forcing with checks and captures.'
+        : 'Good first move. Keep the initiative and convert step by step.';
+    }
+    if (input.meta.mateFound === true) {
+      return 'That first move is right. Keep the initiative with forcing checks and captures.';
+    }
+    return 'You chose the right first move. Convert cleanly from here.';
+  }
+
+  if (input.firstMoveStatus === 'almost_correct') {
+    if (mode === 'rival') {
+      return 'You saw the tactic late. Move order beat you.';
+    }
+    if (mode === 'grandmaster') {
+      return 'Idea recognized, execution imprecise. Move order decides the line.';
+    }
+    if (mode === 'club_friend') {
+      return 'Good idea. Small move-order adjustment and you have it.';
+    }
+    return 'Close. The idea is there, but move order is the key.';
+  }
+
+  if (input.bestMove) {
+    if (mode === 'rival') {
+      return `You missed the forcing move: ${input.bestMove}.`;
+    }
+    if (mode === 'grandmaster') {
+      return `Only forcing line works. Start with ${input.bestMove}.`;
+    }
+    if (mode === 'club_friend') {
+      return `Good try. The tactical key is ${input.bestMove}.`;
+    }
+    return `This feels playable until one forcing move appears. The key move is ${input.bestMove}.`;
+  }
+
+  if (mode === 'rival') {
+    return 'No forcing line, no progress. Start with checks.';
+  }
+  if (mode === 'grandmaster') {
+    return 'Prioritize checks, captures, then direct threats.';
+  }
+  if (mode === 'club_friend') {
+    return 'Let us scan checks, captures, and threats one move at a time.';
+  }
+  return 'This line collapses after a forcing sequence. Start with checks, then captures, then direct threats.';
+}
+
 export default function SolveTestClient() {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { user } = useUser();
@@ -265,6 +560,10 @@ export default function SolveTestClient() {
   const [visibleSolutionCount, setVisibleSolutionCount] = useState(0);
   const [visibleMetaCount, setVisibleMetaCount] = useState(0);
   const [showLowConfidenceHint, setShowLowConfidenceHint] = useState(false);
+  const [coachCueBeats, setCoachCueBeats] = useState<string[]>([]);
+  const [amyPhase, setAmyPhase] = useState<AmyAssistantPhase>('idle');
+  const [amyIsTyping, setAmyIsTyping] = useState(false);
+  const [amyConversationMode, setAmyConversationMode] = useState<AmyConversationMode>('coach');
   const [attemptId, setAttemptId] = useState<string>(() => createAttemptId());
   const [attemptStartedAtMs, setAttemptStartedAtMs] = useState<number | null>(null);
   const [selectedSourceSquare, setSelectedSourceSquare] = useState<string | null>(null);
@@ -279,10 +578,85 @@ export default function SolveTestClient() {
   const [gradientEnabled, setGradientEnabled] = useState<boolean>(false);
   const [gradientDirection, setGradientDirection] = useState<GradientDirection>('top-to-bottom');
   const [settingsStorageScope, setSettingsStorageScope] = useState<string | null>(null);
+  const [parallaxTiltX, setParallaxTiltX] = useState(0);
+  const [parallaxTiltY, setParallaxTiltY] = useState(0);
   const appliedThemeScopeRef = React.useRef<string | null>(null);
   const hydratedRetrySubmissionIdRef = React.useRef<string | null>(null);
   const submitStatusReturnTimerRef = React.useRef<number | null>(null);
   const submitStatusResetTimerRef = React.useRef<number | null>(null);
+  const amyPhaseCycleTimerRef = React.useRef<number | null>(null);
+  const amyPhaseIdleTimerRef = React.useRef<number | null>(null);
+  const amyStreamTimersRef = React.useRef<number[]>([]);
+
+  const clearAmyTimers = React.useCallback(() => {
+    if (amyPhaseCycleTimerRef.current !== null) {
+      window.clearInterval(amyPhaseCycleTimerRef.current);
+      amyPhaseCycleTimerRef.current = null;
+    }
+    if (amyPhaseIdleTimerRef.current !== null) {
+      window.clearTimeout(amyPhaseIdleTimerRef.current);
+      amyPhaseIdleTimerRef.current = null;
+    }
+    amyStreamTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    amyStreamTimersRef.current = [];
+  }, []);
+
+  const resetAmyState = React.useCallback(() => {
+    clearAmyTimers();
+    setAmyPhase('idle');
+    setAmyIsTyping(false);
+    setCoachCueBeats([]);
+  }, [clearAmyTimers]);
+
+  const beginAmyThinkingCycle = React.useCallback(() => {
+    clearAmyTimers();
+    setAmyIsTyping(true);
+    setAmyPhase('thinking');
+    const phaseIntervalMs = AMY_MODE_CONFIG[amyConversationMode].rhythm.phaseIntervalMs;
+    let phaseIndex = 0;
+    amyPhaseCycleTimerRef.current = window.setInterval(() => {
+      phaseIndex = (phaseIndex + 1) % AMY_PHASE_ROTATION.length;
+      setAmyPhase(AMY_PHASE_ROTATION[phaseIndex]);
+    }, phaseIntervalMs);
+  }, [amyConversationMode, clearAmyTimers]);
+
+  const streamAmyCue = React.useCallback(
+    (text: string, mode: AmyConversationMode) => {
+      clearAmyTimers();
+      const modeRhythm = AMY_MODE_CONFIG[mode].rhythm;
+      const beats = buildConversationalBeats(text, {
+        intent: modeRhythm.beatIntent,
+        maxBeats: modeRhythm.maxBeats,
+      });
+      setCoachCueBeats([]);
+      if (beats.length === 0) {
+        setAmyPhase('idle');
+        setAmyIsTyping(false);
+        return;
+      }
+
+      setAmyPhase('responding');
+      setAmyIsTyping(true);
+      const schedule = buildBeatScheduleMs(beats, modeRhythm.scheduleIntent).map(
+        (delay, idx) => delay + idx * modeRhythm.beatOffsetMs,
+      );
+
+      beats.forEach((beat, idx) => {
+        const timer = window.setTimeout(() => {
+          setCoachCueBeats((previous) => [...previous, beat]);
+          if (idx === beats.length - 1) {
+            setAmyIsTyping(false);
+            amyPhaseIdleTimerRef.current = window.setTimeout(() => {
+              setAmyPhase('idle');
+              amyPhaseIdleTimerRef.current = null;
+            }, 420);
+          }
+        }, schedule[idx]);
+        amyStreamTimersRef.current.push(timer);
+      });
+    },
+    [clearAmyTimers],
+  );
 
   useEffect(() => {
     if (!file) {
@@ -400,6 +774,12 @@ export default function SolveTestClient() {
   }, [submitStatus]);
 
   useEffect(() => {
+    return () => {
+      clearAmyTimers();
+    };
+  }, [clearAmyTimers]);
+
+  useEffect(() => {
     setVisibleSolutionCount(0);
     setVisibleMetaCount(0);
     setShowLowConfidenceHint(false);
@@ -473,6 +853,24 @@ export default function SolveTestClient() {
   const backendUrl = useMemo(() => {
     return process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://127.0.0.1:8010';
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const storedMode = window.localStorage.getItem(AMY_CONVERSATION_MODE_STORAGE_KEY);
+    if (!storedMode || !AMY_CONVERSATION_MODE_ORDER.includes(storedMode as AmyConversationMode)) {
+      return;
+    }
+    setAmyConversationMode(storedMode as AmyConversationMode);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.localStorage.setItem(AMY_CONVERSATION_MODE_STORAGE_KEY, amyConversationMode);
+  }, [amyConversationMode]);
 
   useEffect(() => {
     const localAuthUser = readActiveLocalAuthUser();
@@ -551,6 +949,7 @@ export default function SolveTestClient() {
     setFile(hydratedFile);
     setSolutionLines([]);
     setSolveMeta(null);
+    resetAmyState();
     setSubmitStatus('idle');
     setError(null);
     setSelectedSourceSquare(null);
@@ -559,13 +958,14 @@ export default function SolveTestClient() {
     setAttemptId(createAttemptId());
     setAttemptStartedAtMs(performance.now());
     setQueenIsWhite(submission.expectedSideToMove === 'white');
-  }, [retrySubmissionId]);
+  }, [resetAmyState, retrySubmissionId]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const chosen = e.target.files?.[0] ?? null;
     setFile(chosen);
     setSolutionLines([]);
     setSolveMeta(null);
+    resetAmyState();
     setError(null);
     setSubmitStatus('idle');
     setSelectedSourceSquare(null);
@@ -621,6 +1021,7 @@ export default function SolveTestClient() {
     setError(null);
     setSolutionLines([]);
     setSolveMeta(null);
+    resetAmyState();
     setSubmitStatus('sending');
     setFirstMoveSolveOutcome(null);
 
@@ -648,6 +1049,7 @@ export default function SolveTestClient() {
     formData.append('puzzle_id', createPuzzleId(null, file));
     const solveStartedAt = performance.now();
 
+    beginAmyThinkingCycle();
     setLoading(true);
 
     try {
@@ -681,19 +1083,34 @@ export default function SolveTestClient() {
 
         setError(msg);
         setSubmitStatus('idle');
+        clearAmyTimers();
+        setAmyPhase('idle');
+        setAmyIsTyping(false);
       } else {
         const lines = extractSolutionLines(data);
         const normalizedLines = lines.length ? lines : ['(No solution returned)'];
         const meta = extractSolveMeta(data);
+        const bestMove = extractFirstUciMove(data);
+        const firstMoveClassification = classifyFirstMove(firstMoveAttempt.moveUci, bestMove);
         setSolutionLines(normalizedLines);
         setSolveMeta(meta);
+        streamAmyCue(
+          buildAmyCue(
+            {
+              solveSucceeded: isSuccessfulSolve(data),
+              firstMoveStatus: firstMoveClassification.status,
+              bestMove,
+              meta,
+            },
+            amyConversationMode,
+          ),
+          amyConversationMode,
+        );
         setSubmitStatus('done');
 
         if (isSuccessfulSolve(data)) {
           const solveTimeMs = Math.max(0, Math.round(performance.now() - solveStartedAt));
           const originalPuzzleImageDataUrl = await createSubmissionImageDataUrl(file);
-          const bestMove = extractFirstUciMove(data);
-          const firstMoveClassification = classifyFirstMove(firstMoveAttempt.moveUci, bestMove);
           const hasLowConfidence =
             meta.confidence === null || meta.confidence < FIRST_MOVE_MIN_CONFIDENCE;
           const hasInvalidFen = !isValidFenString(data.fen);
@@ -753,7 +1170,14 @@ export default function SolveTestClient() {
       const message = err instanceof Error ? err.message : 'Network error';
       setError(message);
       setSubmitStatus('idle');
+      clearAmyTimers();
+      setAmyPhase('idle');
+      setAmyIsTyping(false);
     } finally {
+      if (amyPhaseCycleTimerRef.current !== null) {
+        window.clearInterval(amyPhaseCycleTimerRef.current);
+        amyPhaseCycleTimerRef.current = null;
+      }
       setLoading(false);
     }
   };
@@ -772,6 +1196,21 @@ export default function SolveTestClient() {
     }, 280);
   };
 
+  const handlePanelPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const relativeX = (event.clientX - rect.left) / rect.width;
+    const relativeY = (event.clientY - rect.top) / rect.height;
+    const centeredX = (relativeX - 0.5) * 2;
+    const centeredY = (relativeY - 0.5) * 2;
+    setParallaxTiltX(Number((centeredX * 8).toFixed(2)));
+    setParallaxTiltY(Number((centeredY * 8).toFixed(2)));
+  };
+
+  const handlePanelPointerLeave = () => {
+    setParallaxTiltX(0);
+    setParallaxTiltY(0);
+  };
+
   const pressable =
     'transition-all duration-150 ease-out select-none ' +
     'shadow-[10px_10px_20px_rgba(0,0,0,0.12),-10px_-10px_20px_rgba(255,255,255,0.75)] ' +
@@ -785,6 +1224,76 @@ export default function SolveTestClient() {
   const controlsLocked = loading || isTransitioningToDashboard;
   const hasSolveResponse = solutionLines.length > 0 || solveMeta !== null;
   const canClickPuzzleToReplace = !!previewUrl && hasSolveResponse && !controlsLocked;
+  const showAmyStatus = true;
+  const displayedAmyPhase: AmyAssistantPhase =
+    amyPhase === 'idle' && loading ? 'thinking' : amyPhase;
+  const activeModeConfig = AMY_MODE_CONFIG[amyConversationMode];
+  const amyStatusText = activeModeConfig.phaseLabels[displayedAmyPhase];
+  const amyEmotionalStateText =
+    displayedAmyPhase === 'idle'
+      ? activeModeConfig.modeIndicator
+      : activeModeConfig.emotionalStates[displayedAmyPhase];
+  const analysisIsActive =
+    loading ||
+    displayedAmyPhase === 'thinking' ||
+    displayedAmyPhase === 'analyzing' ||
+    displayedAmyPhase === 'coaching' ||
+    displayedAmyPhase === 'responding';
+  const attemptedMoveSquares = useMemo(
+    () => (firstMoveAttempt ? extractMoveSquares(firstMoveAttempt.moveUci) : null),
+    [firstMoveAttempt],
+  );
+  const bestMoveSquares = useMemo(
+    () => extractMoveSquares(firstMoveSolveOutcome?.bestMove ?? null),
+    [firstMoveSolveOutcome],
+  );
+  const tacticalMoveSquares = bestMoveSquares ?? attemptedMoveSquares;
+  const tacticalSourceSquare = tacticalMoveSquares?.sourceSquare ?? null;
+  const tacticalDestinationSquare = tacticalMoveSquares?.destinationSquare ?? null;
+  const tacticalSourcePoint = useMemo(
+    () => (tacticalSourceSquare ? getSquareCenterPoint(tacticalSourceSquare) : null),
+    [tacticalSourceSquare],
+  );
+  const tacticalDestinationPoint = useMemo(
+    () => (tacticalDestinationSquare ? getSquareCenterPoint(tacticalDestinationSquare) : null),
+    [tacticalDestinationSquare],
+  );
+  const pathGradientId = useMemo(
+    () => `amy-path-${fileInputId.replace(/[^a-zA-Z0-9_-]/g, '')}`,
+    [fileInputId],
+  );
+  const tacticalPath =
+    tacticalSourcePoint && tacticalDestinationPoint
+      ? {
+          x1: tacticalSourcePoint.x,
+          y1: tacticalSourcePoint.y,
+          x2: tacticalDestinationPoint.x,
+          y2: tacticalDestinationPoint.y,
+        }
+      : null;
+  const tacticalDangerActive =
+    !loading &&
+    (firstMoveSolveOutcome?.status === 'incorrect' || firstMoveSolveOutcome?.status === 'almost_correct');
+  const confidenceScore =
+    solveMeta?.confidence === null || solveMeta?.confidence === undefined
+      ? 0.5
+      : Math.min(1, Math.max(0, solveMeta.confidence));
+  const phasePressureBoost = analysisIsActive ? 0.2 : 0;
+  const outcomePressureBoost =
+    firstMoveSolveOutcome?.status === 'incorrect'
+      ? 0.4
+      : firstMoveSolveOutcome?.status === 'almost_correct'
+        ? 0.26
+        : firstMoveSolveOutcome?.status === 'correct'
+          ? 0.1
+          : 0;
+  const pressureLevel = Math.min(1, Math.max(0.2, (1 - confidenceScore) * 0.5 + phasePressureBoost + outcomePressureBoost));
+  const boardIntensityStyle = {
+    '--amy-board-pressure': pressureLevel.toFixed(2),
+    '--amy-eval-strength': confidenceScore.toFixed(2),
+    '--amy-parallax-x': `${parallaxTiltX}px`,
+    '--amy-parallax-y': `${parallaxTiltY}px`,
+  } as React.CSSProperties;
   const accentChannels = useMemo<[number, number, number]>(
     () => hexToRgbChannels(accentColor) ?? hexToRgbChannels(DEFAULT_DASHBOARD_ACCENT) ?? [122, 148, 191],
     [accentColor],
@@ -830,15 +1339,34 @@ export default function SolveTestClient() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-6" style={{ background: pageBackground }}>
+    <main
+      className="min-h-screen flex items-center justify-center p-6 cinematic-amy-scene"
+      style={{ background: pageBackground }}
+    >
+      <div className="amy-scene-atmosphere" aria-hidden="true">
+        <span className="amy-scene-atmosphere__orb amy-scene-atmosphere__orb--a" />
+        <span className="amy-scene-atmosphere__orb amy-scene-atmosphere__orb--b" />
+        <span className="amy-scene-atmosphere__orb amy-scene-atmosphere__orb--c" />
+      </div>
       <div
-        className={`w-full max-w-[520px] transition-all duration-300 ${
+        className={`w-full max-w-[520px] transition-all duration-300 solve-cinematic-shell ${
+          analysisIsActive ? 'solve-cinematic-shell--active' : ''
+        } ${
           isTransitioningToDashboard
             ? 'opacity-0 scale-[0.98] translate-y-1'
             : 'opacity-100 scale-100 translate-y-0'
         }`}
+        style={boardIntensityStyle}
       >
-        <div className="neumo-surface p-8 md:p-10 relative" style={chessAppPanelStyle}>
+        <div
+          className="neumo-surface p-8 md:p-10 relative solve-cinematic-panel"
+          style={chessAppPanelStyle}
+          onPointerMove={handlePanelPointerMove}
+          onPointerLeave={handlePanelPointerLeave}
+        >
+          <div className="solve-cinematic-layer solve-cinematic-layer--back" aria-hidden="true" />
+          <div className="solve-cinematic-layer solve-cinematic-layer--mid" aria-hidden="true" />
+          <div className="solve-cinematic-layer solve-cinematic-layer--front" aria-hidden="true" />
           <div className="absolute top-4 left-4">
             <button
               type="button"
@@ -918,9 +1446,9 @@ export default function SolveTestClient() {
             <div className={`${file ? 'mt-6' : 'mt-10'} flex justify-center`}>
               {previewUrl ? (
                 <div className="space-y-3">
-                  <div className="neumo-ring w-[260px] h-[260px] rounded-[28px] p-4 flex items-center justify-center">
+                  <div className="neumo-ring w-[260px] h-[260px] rounded-[28px] p-4 flex items-center justify-center chess-board-shell">
                     <div
-                      className={`w-full h-full rounded-[20px] overflow-hidden flex items-center justify-center relative ${
+                      className={`w-full h-full rounded-[20px] overflow-hidden flex items-center justify-center relative chess-board-stage ${
                         canClickPuzzleToReplace ? 'cursor-pointer group' : ''
                       }`}
                       role={canClickPuzzleToReplace ? 'button' : undefined}
@@ -954,7 +1482,7 @@ export default function SolveTestClient() {
                         fill
                         unoptimized
                         sizes="260px"
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover chess-board-image"
                       />
                       {canClickPuzzleToReplace ? (
                         <div className="absolute inset-0 bg-black/0 hover:bg-black/25 transition-colors duration-150 flex items-center justify-center">
@@ -963,31 +1491,70 @@ export default function SolveTestClient() {
                           </span>
                         </div>
                       ) : (
-                        <div className="absolute inset-0 grid grid-cols-8 grid-rows-8">
-                          {Array.from({ length: 64 }, (_, idx) => {
-                            const row = Math.floor(idx / 8);
-                            const col = idx % 8;
-                            const square = squareFromBoardIndex(row, col);
-                            const isSelectedSource = selectedSourceSquare === square;
-                            const isSelectedDestination = firstMoveAttempt?.destinationSquare === square;
-                            const isCommittedSource = firstMoveAttempt?.sourceSquare === square;
-                            return (
-                              <button
-                                key={square}
-                                type="button"
-                                onClick={() => handleSquareClick(square)}
-                                disabled={controlsLocked}
-                                className={`border border-black/15 dark:border-white/10 transition-colors ${
-                                  isSelectedSource
-                                    ? 'bg-sky-500/35'
-                                    : isCommittedSource || isSelectedDestination
-                                      ? 'bg-emerald-500/35'
-                                      : 'bg-transparent hover:bg-white/12'
-                                }`}
-                                aria-label={`Select square ${square}`}
-                              />
-                            );
-                          })}
+                        <div className="absolute inset-0">
+                          <div className="absolute inset-0 grid grid-cols-8 grid-rows-8">
+                            {Array.from({ length: 64 }, (_, idx) => {
+                              const row = Math.floor(idx / 8);
+                              const col = idx % 8;
+                              const square = squareFromBoardIndex(row, col);
+                              const isSelectedSource = selectedSourceSquare === square;
+                              const isSelectedDestination = firstMoveAttempt?.destinationSquare === square;
+                              const isCommittedSource = firstMoveAttempt?.sourceSquare === square;
+                              const isTacticalSource = tacticalSourceSquare === square;
+                              const isTacticalDestination = tacticalDestinationSquare === square;
+                              const isDangerSquare = tacticalDangerActive && isTacticalDestination;
+                              return (
+                                <button
+                                  key={square}
+                                  type="button"
+                                  onClick={() => handleSquareClick(square)}
+                                  disabled={controlsLocked}
+                                  className={`border border-black/15 dark:border-white/10 transition-colors chess-square-cell ${
+                                    isSelectedSource
+                                      ? 'bg-sky-500/35'
+                                      : isCommittedSource || isSelectedDestination
+                                        ? 'bg-emerald-500/35'
+                                        : 'bg-transparent hover:bg-white/12'
+                                  } ${isTacticalSource ? 'chess-square-cell--source' : ''} ${
+                                    isTacticalDestination ? 'chess-square-cell--target' : ''
+                                  } ${isDangerSquare ? 'chess-square-cell--danger' : ''}`}
+                                  aria-label={`Select square ${square}`}
+                                />
+                              );
+                            })}
+                          </div>
+                          {tacticalPath && !canClickPuzzleToReplace && (
+                            <div className="absolute inset-0 pointer-events-none chess-board-intelligence">
+                              <svg
+                                viewBox="0 0 100 100"
+                                preserveAspectRatio="none"
+                                className="h-full w-full overflow-visible"
+                                aria-hidden="true"
+                              >
+                                <defs>
+                                  <linearGradient id={pathGradientId} x1="0%" y1="0%" x2="100%" y2="0%">
+                                    <stop offset="0%" stopColor="rgba(56, 189, 248, 0.08)" />
+                                    <stop offset="45%" stopColor="rgba(56, 189, 248, 0.88)" />
+                                    <stop offset="100%" stopColor="rgba(244, 114, 182, 0.82)" />
+                                  </linearGradient>
+                                </defs>
+                                <line
+                                  x1={tacticalPath.x1}
+                                  y1={tacticalPath.y1}
+                                  x2={tacticalPath.x2}
+                                  y2={tacticalPath.y2}
+                                  className="chess-intel-path-line"
+                                  stroke={`url(#${pathGradientId})`}
+                                />
+                                <circle
+                                  cx={tacticalPath.x2}
+                                  cy={tacticalPath.y2}
+                                  r="2.8"
+                                  className="chess-intel-path-dot"
+                                />
+                              </svg>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1101,8 +1668,81 @@ export default function SolveTestClient() {
             </div>
           )}
 
-          <div className="mt-10 neumo-surface-soft p-8" style={chessAppPanelStyle}>
+          <div className="mt-10 neumo-surface-soft p-8 solve-cinematic-solution" style={chessAppPanelStyle}>
             <h2 className="text-4xl font-semibold tracking-tight mb-5">Solution</h2>
+            <div className="mb-5 flex flex-wrap gap-2">
+              {AMY_CONVERSATION_MODE_ORDER.map((mode) => {
+                const isActive = amyConversationMode === mode;
+                const modeLabel = AMY_MODE_CONFIG[mode].label;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      setAmyConversationMode(mode);
+                      if (!loading) {
+                        resetAmyState();
+                      }
+                    }}
+                    disabled={controlsLocked}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold tracking-wide transition ${
+                      isActive
+                        ? 'neumo-pill text-slate-700 dark:text-slate-100'
+                        : 'neumo-inset text-slate-500 dark:text-slate-300'
+                    } ${controlsLocked ? 'opacity-65 cursor-not-allowed' : 'hover:-translate-y-[1px]'}`}
+                    aria-pressed={isActive}
+                    aria-label={`Switch Amy to ${modeLabel} mode`}
+                    title={modeLabel}
+                  >
+                    {modeLabel}
+                  </button>
+                );
+              })}
+            </div>
+            {showAmyStatus && (
+              <div
+                className={`mb-5 amy-solve-status chess-stream-item ${
+                  displayedAmyPhase !== 'idle' ? 'amy-solve-status--active' : ''
+                } ${analysisIsActive ? 'amy-solve-status--intense' : ''}`}
+                role="status"
+                aria-live="polite"
+              >
+                <span className="amy-solve-status__dot" aria-hidden="true" />
+                <span className="min-w-0 flex-1 leading-tight">
+                  <span className="block text-sm font-medium">{amyStatusText}</span>
+                  <span className="block text-[11px] opacity-70 tracking-wide uppercase">
+                    {amyEmotionalStateText}
+                  </span>
+                </span>
+                {amyIsTyping && (
+                  <span className="amy-solve-typing" aria-label="Amy is typing">
+                    typing
+                  </span>
+                )}
+              </div>
+            )}
+            <div className="mb-5 chess-eval-shell chess-stream-item" aria-hidden="true">
+              <div className="chess-eval-line">
+                <span
+                  className="chess-eval-line__fill"
+                  style={{ width: `${Math.round(confidenceScore * 100)}%` }}
+                />
+              </div>
+              <span className={`chess-eval-pulse ${analysisIsActive ? 'chess-eval-pulse--active' : ''}`} />
+            </div>
+
+            {coachCueBeats.length > 0 && (
+              <div className="mb-5 space-y-2">
+                {coachCueBeats.map((beat, idx) => (
+                  <p
+                    key={`${idx}-${beat}`}
+                    className="whitespace-pre-line text-sm font-medium opacity-85 chess-stream-item"
+                  >
+                    {beat}
+                  </p>
+                ))}
+              </div>
+            )}
 
             {solutionLines.length > 0 ? (
               <ol className="space-y-3 text-2xl md:text-[28px] leading-snug">
@@ -1154,9 +1794,11 @@ export default function SolveTestClient() {
                 </dl>
 
                 {showLowConfidenceHint && (
-                  <p className="mt-4 text-xs opacity-70 chess-stream-item">
-                    Low vision confidence can cause wrong puzzle positions. Try a cleaner crop and
-                    verify the side selector in the top-left.
+                  <p className="mt-4 whitespace-pre-line text-xs opacity-70 chess-stream-item">
+                    {formatConversationalText(
+                      'This position may be misread. Use a cleaner crop, then verify the side selector in the top-left.',
+                      { intent: 'status', maxBeats: 3 },
+                    )}
                   </p>
                 )}
 

@@ -1,8 +1,23 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertCircle, Bot, CornerDownLeft, Loader2, Send } from 'lucide-react';
+import { AlertCircle, CornerDownLeft, Loader2, Send, Square } from 'lucide-react';
 import { requestAgentChat } from '@/lib/agent-chat-api';
+import {
+  DEFAULT_ASSISTANT_CONVERSATION_MODE,
+  getModeWelcomeShort,
+  type AssistantConversationMode,
+} from '@/lib/assistant-conversation-mode';
+import {
+  buildBeatScheduleMs,
+  buildConversationalBeats,
+} from '@/lib/assistant-rhythm';
+import { AmyIdentityMark } from '@/components/amy-identity-mark';
+import type { PuzzleSubmissionRecord } from '@/lib/puzzle-submissions';
+import {
+  buildAdaptiveSuggestionChips,
+  buildConversationalMomentumActions,
+} from '@/app/dashboard/agent-chat-state';
 
 type AgentChatRole = 'assistant' | 'user';
 
@@ -17,11 +32,21 @@ type AgentChatMessage = {
 type AgentChatProps = {
   panelStyle?: React.CSSProperties;
   starterPrompts?: readonly string[];
+  submissions?: PuzzleSubmissionRecord[];
   backendUrl?: string;
+  conversationMode?: AssistantConversationMode;
   title?: string;
   subtitle?: string;
   placeholder?: string;
 };
+
+const ROTATING_INPUT_PROMPTS = [
+  'Show me the tactic.',
+  'What am I missing?',
+  'Analyze my idea.',
+  'Why does this fail?',
+  'Help me calculate.',
+] as const;
 
 function formatTimestamp(date: Date): string {
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -36,25 +61,23 @@ function buildId(prefix: string): string {
 
 function MessageBubble({ message }: { message: AgentChatMessage }) {
   const isAssistant = message.role === 'assistant';
+  const bubbleToneClass = isAssistant
+    ? message.isError
+      ? 'amy-chat-bubble--error'
+      : 'amy-chat-bubble--assistant'
+    : 'amy-chat-bubble--user';
 
   return (
     <article className={`chess-stream-item flex ${isAssistant ? 'justify-start' : 'justify-end'}`}>
-      <div
-        className={`max-w-[94%] rounded-2xl px-4 py-3 shadow-[0_14px_28px_rgba(2,6,23,0.2)] backdrop-blur-xl sm:max-w-[86%] ${
-          isAssistant
-            ? message.isError
-              ? 'border border-rose-400/35 bg-rose-50/85 text-rose-900 dark:border-rose-300/35 dark:bg-rose-600/20 dark:text-rose-100'
-              : 'border border-cyan-200/65 bg-gradient-to-br from-white/90 via-cyan-50/75 to-indigo-50/80 text-zinc-800 dark:border-cyan-300/30 dark:from-slate-900/95 dark:via-slate-800/92 dark:to-indigo-900/72 dark:text-zinc-50'
-            : 'border border-violet-400/30 bg-gradient-to-br from-violet-500/85 to-indigo-500/85 text-white dark:border-violet-300/20 dark:from-violet-500/45 dark:to-indigo-500/45'
-        }`}
-      >
+      <div className={`amy-chat-bubble ${bubbleToneClass} max-w-[94%] rounded-2xl px-4 py-3 sm:max-w-[86%]`}>
+        {isAssistant && !message.isError && (
+          <p className="amy-chat-bubble__speaker mb-2 text-[10px] font-semibold uppercase tracking-[0.18em]">
+            Amy
+          </p>
+        )}
         <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.text}</p>
 
-        <p
-          className={`mt-2 text-[11px] ${
-            isAssistant ? 'text-zinc-600 dark:text-cyan-100/95' : 'text-violet-100/90'
-          }`}
-        >
+        <p className="amy-chat-bubble__time mt-2 text-[11px]">
           {message.timestamp}
         </p>
       </div>
@@ -65,27 +88,58 @@ function MessageBubble({ message }: { message: AgentChatMessage }) {
 export function AgentChat({
   panelStyle,
   starterPrompts = [],
+  submissions = [],
   backendUrl,
-  title = 'Chess Assistant',
-  subtitle = 'Ask about your puzzles, app workflows, or training plan.',
-  placeholder = 'Ask a question...',
+  conversationMode = DEFAULT_ASSISTANT_CONVERSATION_MODE,
+  title = 'Amy',
+  subtitle = 'Calm, strategic coaching with progressive chess guidance.',
+  placeholder = 'Ask Amy for a hint, candidate-move check, or full line...',
 }: AgentChatProps) {
   const [messages, setMessages] = useState<AgentChatMessage[]>([
     {
       id: 'assistant-welcome',
       role: 'assistant',
-      text: "Hi, I'm your chess assistant. Ask anything about your puzzle work and app usage.",
+      text: getModeWelcomeShort(conversationMode),
       timestamp: formatTimestamp(new Date()),
     },
   ]);
   const [input, setInput] = useState('');
+  const [inputPromptIndex, setInputPromptIndex] = useState(0);
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const activeRequestRef = useRef<AbortController | null>(null);
+  const assistantBeatTimersRef = useRef<number[]>([]);
 
   const canSend = input.trim().length > 0 && !isSending;
+  const rotatingPlaceholder = ROTATING_INPUT_PROMPTS[inputPromptIndex] ?? placeholder;
+  const adaptiveSuggestions = React.useMemo(() => {
+    const adaptive = buildAdaptiveSuggestionChips({
+      submissions,
+      messages,
+      isSending,
+    });
+    if (adaptive.length > 0) {
+      return adaptive;
+    }
+
+    return starterPrompts.slice(0, 5).map((prompt, index) => ({
+      id: `legacy-${index}-${prompt}`,
+      label: prompt,
+      prompt,
+    }));
+  }, [isSending, messages, starterPrompts, submissions]);
+  const momentumActions = React.useMemo(
+    () =>
+      buildConversationalMomentumActions({
+        submissions,
+        messages,
+        isSending,
+      }),
+    [isSending, messages, submissions],
+  );
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -94,8 +148,84 @@ export function AgentChat({
   useEffect(() => {
     return () => {
       activeRequestRef.current?.abort();
+      assistantBeatTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      assistantBeatTimersRef.current = [];
     };
   }, []);
+
+  useEffect(() => {
+    if (isInputFocused || input.trim().length > 0 || isSending) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setInputPromptIndex((previous) => (previous + 1) % ROTATING_INPUT_PROMPTS.length);
+    }, 2600);
+    return () => window.clearInterval(timer);
+  }, [input, isInputFocused, isSending]);
+
+  const appendAssistantBeats = async (
+    rawText: string,
+    signal: AbortSignal,
+    isError = false,
+  ) => {
+    const beats = buildConversationalBeats(rawText, {
+      intent: isError ? 'status' : 'chat',
+    });
+    if (beats.length === 0 || signal.aborted) {
+      return;
+    }
+
+    const schedule = buildBeatScheduleMs(beats, isError ? 'status' : 'chat');
+    assistantBeatTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    assistantBeatTimersRef.current = [];
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const handleAbort = () => {
+        assistantBeatTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+        assistantBeatTimersRef.current = [];
+        settle();
+      };
+      const settle = () => {
+        if (!settled) {
+          settled = true;
+          signal.removeEventListener('abort', handleAbort);
+          resolve();
+        }
+      };
+      signal.addEventListener('abort', handleAbort, { once: true });
+
+      beats.forEach((beat, idx) => {
+        const timer = window.setTimeout(() => {
+          if (signal.aborted) {
+            return;
+          }
+          setMessages((previous) => [
+            ...previous,
+            {
+              id: buildId(isError ? 'assistant-error' : 'assistant'),
+              role: 'assistant',
+              text: beat,
+              timestamp: formatTimestamp(new Date()),
+              isError: isError || undefined,
+            },
+          ]);
+          if (idx === beats.length - 1) {
+            settle();
+          }
+        }, schedule[idx]);
+        assistantBeatTimersRef.current.push(timer);
+      });
+    });
+  };
+
+  const stopActiveRequest = () => {
+    const controller = activeRequestRef.current;
+    if (!controller) {
+      return;
+    }
+    controller.abort();
+  };
 
   const submitMessage = async (rawMessage: string) => {
     const trimmed = rawMessage.trim();
@@ -119,24 +249,19 @@ export function AgentChat({
     const controller = new AbortController();
     activeRequestRef.current = controller;
     setIsSending(true);
+    assistantBeatTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    assistantBeatTimersRef.current = [];
 
     try {
       const result = await requestAgentChat({
         query: trimmed,
         limit: 5,
+        conversationMode,
         signal: controller.signal,
         backendUrl,
       });
       const answerText = result.answer.trim() || 'No answer returned.';
-      setMessages((previous) => [
-        ...previous,
-        {
-          id: buildId('assistant'),
-          role: 'assistant',
-          text: answerText,
-          timestamp: formatTimestamp(new Date()),
-        },
-      ]);
+      await appendAssistantBeats(answerText, controller.signal);
     } catch (error: unknown) {
       if (controller.signal.aborted) {
         return;
@@ -146,16 +271,7 @@ export function AgentChat({
           ? error.message
           : 'Assistant request failed. Please try again.';
       setErrorMessage(message);
-      setMessages((previous) => [
-        ...previous,
-        {
-          id: buildId('assistant-error'),
-          role: 'assistant',
-          text: message,
-          timestamp: formatTimestamp(new Date()),
-          isError: true,
-        },
-      ]);
+      await appendAssistantBeats(message, controller.signal, true);
     } finally {
       if (activeRequestRef.current === controller) {
         activeRequestRef.current = null;
@@ -165,24 +281,64 @@ export function AgentChat({
     }
   };
 
+  useEffect(() => {
+    setMessages((previous) => {
+      if (previous.length === 0) {
+        return previous;
+      }
+      const [first, ...rest] = previous;
+      if (first.id !== 'assistant-welcome') {
+        return previous;
+      }
+      return [
+        {
+          ...first,
+          text: getModeWelcomeShort(conversationMode),
+        },
+        ...rest,
+      ];
+    });
+  }, [conversationMode]);
+
   return (
     <section
-      className="rounded-[28px] border border-slate-200/75 bg-white/70 p-4 shadow-[0_18px_44px_rgba(2,6,23,0.16)] backdrop-blur-xl dark:border-slate-500/55 dark:bg-slate-950/72 dark:shadow-[0_18px_44px_rgba(2,6,23,0.42)] md:p-6"
+      className="amy-chat-shell rounded-[28px] border border-slate-200/75 bg-white/70 p-4 shadow-[0_18px_44px_rgba(2,6,23,0.16)] backdrop-blur-xl dark:border-slate-500/55 dark:bg-slate-950/72 dark:shadow-[0_18px_44px_rgba(2,6,23,0.42)] md:p-6"
       style={panelStyle}
     >
-      <header className="mb-4 flex items-start gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-cyan-300/40 bg-gradient-to-br from-cyan-200/80 to-violet-300/70 shadow-[0_0_18px_rgba(45,212,191,0.26)] dark:border-cyan-300/35 dark:from-cyan-400/35 dark:to-violet-500/35">
-          <Bot className="h-5 w-5 text-cyan-800 dark:text-cyan-100" aria-hidden="true" />
+      <header className="amy-chat-header mb-4 flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <AmyIdentityMark size="md" />
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-zinc-800 dark:text-white" style={{ color: 'rgb(var(--fg))' }}>
+              {title}
+            </h2>
+            <p className="mt-1 text-sm text-zinc-700 dark:text-white" style={{ color: 'rgb(var(--fg))' }}>
+              {subtitle}
+            </p>
+            <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.14em] text-cyan-700/75 dark:text-cyan-200/85">
+              Strategic companion | emotionally aware | modern coach
+            </p>
+          </div>
         </div>
         <div>
-          <h2 className="text-xl font-semibold tracking-tight text-zinc-800 dark:text-zinc-50">{title}</h2>
-          <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-100">{subtitle}</p>
+          <span className="amy-presence-pill" aria-label="Amy is present">
+            Amy online
+          </span>
         </div>
       </header>
 
-      <div className="neumo-inset rounded-2xl border border-slate-200/70 px-3 py-3 dark:border-slate-500/60 dark:bg-slate-950/58 md:px-4">
+      <div className="amy-chat-stage neumo-inset relative overflow-hidden rounded-2xl border border-slate-200/70 px-3 py-3 dark:border-slate-500/60 dark:bg-slate-950/58 md:px-4">
+        <div className="amy-chat-stage__gradient" aria-hidden="true" />
+        <div className="amy-chat-stage__veil" aria-hidden="true" />
+        <div className="amy-chat-stage__haze" aria-hidden="true" />
+        <div className="amy-chat-stage__glow amy-chat-stage__glow--a" aria-hidden="true" />
+        <div className="amy-chat-stage__glow amy-chat-stage__glow--b" aria-hidden="true" />
+        <div className="amy-chat-stage__grain" aria-hidden="true" />
+        <div className="amy-chat-stage__silhouette amy-chat-stage__silhouette--queen" aria-hidden="true" />
+        <div className="amy-chat-stage__silhouette amy-chat-stage__silhouette--knight" aria-hidden="true" />
+        <div className="amy-chat-stage__particles" aria-hidden="true" />
         <div
-          className="max-h-[54vh] min-h-[280px] space-y-3 overflow-y-auto pr-1 sm:min-h-[320px]"
+          className="relative z-10 max-h-[54vh] min-h-[280px] space-y-3 overflow-y-auto pr-1 sm:min-h-[320px]"
           aria-live="polite"
           aria-label="Assistant chat message history"
         >
@@ -192,9 +348,9 @@ export function AgentChat({
 
           {isSending && (
             <article className="flex justify-start">
-              <div className="inline-flex items-center gap-2 rounded-2xl border border-cyan-200/65 bg-white/86 px-3 py-2 text-xs text-zinc-700 shadow-[0_8px_18px_rgba(2,6,23,0.12)] dark:border-cyan-300/45 dark:bg-slate-900/88 dark:text-zinc-50">
+              <div className="amy-chat-bubble amy-chat-bubble--assistant inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                Assistant is thinking...
+                Amy is thinking...
               </div>
             </article>
           )}
@@ -202,21 +358,44 @@ export function AgentChat({
         </div>
       </div>
 
-      {starterPrompts.length > 0 && (
+      {adaptiveSuggestions.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-2">
-          {starterPrompts.map((prompt) => (
+          {adaptiveSuggestions.map((chip) => (
             <button
-              key={prompt}
+              key={chip.id}
               type="button"
               onClick={() => {
-                void submitMessage(prompt);
+                void submitMessage(chip.prompt);
               }}
               disabled={isSending}
               className="rounded-full border border-slate-300/70 bg-white/82 px-3.5 py-1.5 text-xs font-medium text-zinc-700 transition-all duration-200 hover:-translate-y-[1px] hover:border-cyan-300/55 hover:bg-cyan-50/80 disabled:cursor-not-allowed disabled:opacity-60 dark:border-cyan-200/35 dark:bg-slate-900/72 dark:text-zinc-100 dark:hover:border-cyan-200/55 dark:hover:bg-slate-800/80"
             >
-              {prompt}
+              {chip.label}
             </button>
           ))}
+        </div>
+      )}
+
+      {momentumActions.length > 0 && (
+        <div className="mt-3 rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2 backdrop-blur-lg dark:border-slate-500/55 dark:bg-slate-900/72">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-300">
+            Continue With Amy
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {momentumActions.map((action) => (
+              <button
+                key={action.id}
+                type="button"
+                onClick={() => {
+                  void submitMessage(action.prompt);
+                }}
+                disabled={isSending}
+                className="rounded-full border border-cyan-300/35 bg-gradient-to-r from-white/90 to-cyan-50/80 px-3 py-1.5 text-xs font-semibold text-slate-700 transition-all duration-200 hover:-translate-y-[1px] hover:border-cyan-300/55 hover:shadow-[0_8px_18px_rgba(2,6,23,0.1)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-cyan-200/35 dark:from-slate-900/90 dark:to-slate-800/90 dark:text-cyan-100"
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -235,25 +414,39 @@ export function AgentChat({
           event.preventDefault();
           void submitMessage(input);
         }}
-        className="mt-4 rounded-2xl border border-slate-200/75 bg-white/75 p-3 backdrop-blur-xl dark:border-slate-500/55 dark:bg-slate-900/78"
+        className="amy-chat-input-shell mt-4 rounded-2xl p-3"
       >
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            disabled={isSending}
-            placeholder={placeholder}
-            className="h-11 w-full rounded-2xl border border-slate-300/80 bg-white/95 px-4 text-sm text-zinc-800 outline-none transition-all duration-200 placeholder:text-zinc-500 focus-visible:ring-2 focus-visible:ring-cyan-400/40 dark:border-slate-400/80 dark:bg-slate-950/92 dark:text-zinc-50 dark:placeholder:text-zinc-300 dark:focus-visible:ring-cyan-300/45"
-            aria-label="Ask assistant"
-          />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="amy-chat-input-wrap">
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onFocus={() => setIsInputFocused(true)}
+              onBlur={() => setIsInputFocused(false)}
+              disabled={isSending}
+              placeholder={rotatingPlaceholder}
+              className="amy-chat-input h-11 w-full rounded-2xl px-4 text-sm outline-none"
+              aria-label="Ask Amy"
+            />
+          </div>
           <button
-            type="submit"
-            disabled={!canSend}
-            className="inline-flex h-11 min-w-[112px] items-center justify-center gap-2 rounded-2xl border border-cyan-300/35 bg-gradient-to-r from-violet-500/75 to-cyan-500/75 px-4 text-sm font-semibold text-white transition-all duration-200 hover:-translate-y-[1px] focus-visible:ring-2 focus-visible:ring-cyan-300/50 disabled:cursor-not-allowed disabled:opacity-55"
+            type={isSending ? 'button' : 'submit'}
+            onClick={
+              isSending
+                ? () => {
+                    stopActiveRequest();
+                  }
+                : undefined
+            }
+            disabled={!isSending && !canSend}
+            className={`amy-chat-send-btn inline-flex h-11 min-w-[112px] items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold ${
+              !isSending && canSend ? 'amy-chat-send-btn--ready' : ''
+            }`}
+            aria-label={isSending ? 'Stop assistant response' : 'Send message'}
           >
-            {isSending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Send className="h-4 w-4" aria-hidden="true" />}
-            {isSending ? 'Sending...' : 'Send'}
+            {isSending ? <Square className="h-4 w-4" aria-hidden="true" /> : <Send className="h-4 w-4" aria-hidden="true" />}
+            <span className="hidden sm:inline">{isSending ? 'Stop' : 'Send'}</span>
           </button>
         </div>
         <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-100">

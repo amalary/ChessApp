@@ -1,4 +1,5 @@
 import { readActiveLocalAuthUser } from '@/lib/dashboard-theme-settings';
+import type { AssistantConversationMode } from '@/lib/assistant-conversation-mode';
 
 export type AgentChatResponse = {
   query: string;
@@ -16,6 +17,7 @@ type AgentChatErrorPayload = {
 type AgentChatRequest = {
   query: string;
   limit?: number;
+  conversationMode?: AssistantConversationMode;
   signal?: AbortSignal;
   backendUrl?: string;
 };
@@ -60,6 +62,7 @@ function parseErrorMessage(payload: AgentChatErrorPayload, fallback: string): st
 export async function requestAgentChat({
   query,
   limit = 5,
+  conversationMode,
   signal,
   backendUrl,
 }: AgentChatRequest): Promise<AgentChatResponse> {
@@ -81,7 +84,11 @@ export async function requestAgentChat({
     response = await fetch(`${rootUrl}/agent/chat`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ query: normalizedQuery, limit }),
+      body: JSON.stringify({
+        query: normalizedQuery,
+        limit,
+        conversation_mode: conversationMode ?? 'coach',
+      }),
       signal,
     });
   } catch (error: unknown) {

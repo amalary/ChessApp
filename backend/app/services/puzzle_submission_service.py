@@ -369,13 +369,19 @@ def build_submission_history_context_for_user(
                 "fileName": submission.fileName,
                 "submittedAt": submission.submittedAt,
                 "fen": submission.fen,
+                "solveTimeMs": submission.solveTimeMs,
                 "puzzleElo": submission.puzzleElo,
                 "difficultyRating": submission.difficultyRating,
                 "estimatedDifficultyRating": submission.estimatedDifficultyRating,
                 "mateIn": position_check.get("mateIn"),
                 "visionConfidence": position_check.get("confidence"),
+                "attemptsUsed": position_check.get("attemptsUsed"),
                 "firstMoveCorrect": first_move_assessment.get("isFirstMoveCorrect"),
                 "firstMoveStatus": first_move_assessment.get("status"),
+                "timeToFirstMoveSeconds": first_move_assessment.get(
+                    "timeToFirstMoveSeconds"
+                ),
+                "puzzleId": first_move_assessment.get("puzzleId"),
                 "solutionLines": submission.solutionLines,
             }
         )

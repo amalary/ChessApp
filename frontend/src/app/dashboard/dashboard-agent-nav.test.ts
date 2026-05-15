@@ -20,6 +20,8 @@ describe('dashboard agent nav wiring', () => {
     const source = fs.readFileSync(filePath, 'utf8');
 
     expect(source).toContain("const isAgentView = activeNavLabel === 'Agent';");
-    expect(source).toContain('{isAgentView && <AgentPage panelStyle={dashboardContainerStyle} />}');
+    expect(source).toContain(
+      'assistantConversationMode={assistantConversationMode}',
+    );
   });
 });

@@ -1,12 +1,15 @@
 'use client';
 
 import React from 'react';
-import { Sparkles } from 'lucide-react';
 import { AgentChat } from '@/components/agent-chat';
-import { AGENT_STARTER_PROMPTS } from './agent-chat-state';
+import { AmyIdentityMark } from '@/components/amy-identity-mark';
+import type { AssistantConversationMode } from '@/lib/assistant-conversation-mode';
+import type { PuzzleSubmissionRecord } from '@/lib/puzzle-submissions';
 
 type AgentPageProps = {
   panelStyle?: React.CSSProperties;
+  assistantConversationMode?: AssistantConversationMode;
+  submissions?: PuzzleSubmissionRecord[];
 };
 
 function SuggestedHelpCard() {
@@ -47,20 +50,75 @@ function SuggestedHelpCard() {
   );
 }
 
-function RecentPuzzleContextCard() {
-  const rows = [
-    ['Fork in the Road', 'Forks', 'Solved 2h ago', '92% accuracy'],
-    ['Sacrifice on h7', 'Sacrifices', 'Solved 4h ago', '71% accuracy'],
-    ['Back Rank Pressure', 'Back-Rank Mates', 'Solved 1d ago', '95% accuracy'],
+function inferMotifFromSubmission(submission: PuzzleSubmissionRecord): string {
+  const searchable = `${submission.fileName} ${submission.solutionLines.join(' ')}`.toLowerCase();
+  if (/\bmating\s+net|back[-\s]?rank|mate[-\s]?in[-\s]?[123]/.test(searchable)) {
+    return 'Mating Nets';
+  }
+  if (/\bfork/.test(searchable)) {
+    return 'Forks';
+  }
+  if (/\bpin/.test(searchable)) {
+    return 'Pins';
+  }
+  if (/\bskewer|x[-\s]?ray/.test(searchable)) {
+    return 'Skewers';
+  }
+  if (/\bsacrifice|sac\b/.test(searchable)) {
+    return 'Sacrifices';
+  }
+  return 'Calculation';
+}
+
+function formatRelativeSubmissionTime(iso: string): string {
+  const timestamp = Date.parse(iso);
+  if (!Number.isFinite(timestamp)) {
+    return 'Solved recently';
+  }
+  const diffMs = Date.now() - timestamp;
+  if (diffMs < 60 * 60 * 1000) {
+    const minutes = Math.max(1, Math.round(diffMs / (60 * 1000)));
+    return `Solved ${minutes}m ago`;
+  }
+  if (diffMs < 24 * 60 * 60 * 1000) {
+    const hours = Math.max(1, Math.round(diffMs / (60 * 60 * 1000)));
+    return `Solved ${hours}h ago`;
+  }
+  const days = Math.max(1, Math.round(diffMs / (24 * 60 * 60 * 1000)));
+  return `Solved ${days}d ago`;
+}
+
+function RecentPuzzleContextCard({ submissions = [] }: { submissions?: PuzzleSubmissionRecord[] }) {
+  const rows = submissions.slice(0, 3).map((submission) => {
+    const hasAssessment = submission.firstMoveAssessment?.isValidForFirstMoveAccuracy === true;
+    const accuracyLabel = hasAssessment
+      ? submission.firstMoveAssessment?.isFirstMoveCorrect
+        ? 'First move correct'
+        : 'First move missed'
+      : 'No first-move sample';
+
+    return [
+      submission.fileName || 'Uploaded puzzle',
+      inferMotifFromSubmission(submission),
+      formatRelativeSubmissionTime(submission.submittedAt),
+      accuracyLabel,
+    ] as const;
+  });
+
+  const fallbackRows = [
+    ['Waiting for puzzle history', 'Theme pending', 'Solve a puzzle', 'Profile building'],
+    ['Adaptive context', 'Motifs loading', 'From your submissions', 'Personalized in real-time'],
   ] as const;
+
+  const displayRows = rows.length > 0 ? rows : fallbackRows;
 
   return (
     <article className="rounded-3xl border border-slate-200/80 bg-white/68 p-4 backdrop-blur-xl dark:border-slate-500/90 dark:bg-slate-950/84">
       <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Recent Puzzle Context</h3>
       <div className="mt-3 space-y-2.5">
-        {rows.map(([title, theme, solvedAt, accuracy]) => (
+        {displayRows.map(([title, theme, solvedAt, accuracy]) => (
           <div
-            key={title}
+            key={`${title}-${theme}-${solvedAt}`}
             className="rounded-2xl border border-slate-200/80 bg-white/88 px-3 py-2.5 dark:border-slate-500/80 dark:bg-slate-900/84"
           >
             <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">{title}</p>
@@ -103,44 +161,55 @@ function GuardrailsCard() {
   );
 }
 
-function AssistantInfoCards() {
+function AssistantInfoCards({ submissions }: { submissions?: PuzzleSubmissionRecord[] }) {
   return (
     <div className="space-y-4">
       <SuggestedHelpCard />
-      <RecentPuzzleContextCard />
+      <RecentPuzzleContextCard submissions={submissions} />
       <GuardrailsCard />
     </div>
   );
 }
 
-export function AgentPage({ panelStyle }: AgentPageProps) {
+export function AgentPage({ panelStyle, assistantConversationMode, submissions = [] }: AgentPageProps) {
   return (
     <section className="space-y-4">
       <header
-        className="rounded-[28px] border border-slate-200/75 bg-white/70 px-5 py-5 backdrop-blur-xl dark:border-white/10 dark:bg-white/6"
+        className="amy-chat-shell rounded-[28px] border border-slate-200/75 bg-white/70 px-5 py-5 backdrop-blur-xl dark:border-white/10 dark:bg-white/6"
         style={panelStyle}
       >
-        <div className="flex items-center gap-2">
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-800 dark:text-white" style={{ color: 'rgb(var(--fg))' }}>
-            Chess Assistant
-          </h2>
-          <Sparkles className="h-5 w-5 text-cyan-700 dark:text-cyan-200" />
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <AmyIdentityMark size="sm" />
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight text-zinc-800 dark:text-white" style={{ color: 'rgb(var(--fg))' }}>
+                Amy
+              </h2>
+              <p className="mt-1 text-sm text-zinc-700 dark:text-white" style={{ color: 'rgb(var(--fg))' }}>
+                Calm tactical guidance with human-level pacing and strategic clarity.
+              </p>
+              <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.14em] text-cyan-700/75 dark:text-cyan-200/85">
+                Chess coach | strategic companion
+              </p>
+            </div>
+          </div>
+          <span className="amy-presence-pill" aria-label="Amy is present">
+            Amy online
+          </span>
         </div>
-        <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-100">
-          Ask questions about your puzzles, progress, and how to use the app.
-        </p>
       </header>
 
       <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
         <AgentChat
           panelStyle={panelStyle}
-          starterPrompts={AGENT_STARTER_PROMPTS}
-          title="Chess Tutor"
-          subtitle="Grounded responses from your docs and assistant knowledge base."
-          placeholder="Ask about a puzzle, analytics trend, or app feature..."
+          submissions={submissions}
+          conversationMode={assistantConversationMode}
+          title="Amy"
+          subtitle="Progressive chess coaching with calm, clear tactical guidance."
+          placeholder="Ask Amy for a hint, share a candidate move, or request the full line..."
         />
 
-        <AssistantInfoCards />
+        <AssistantInfoCards submissions={submissions} />
       </div>
     </section>
   );

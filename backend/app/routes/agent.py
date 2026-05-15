@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -49,6 +50,9 @@ class RetrievalResponse(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     limit: int = Field(default=5, ge=1)
+    conversation_mode: Literal[
+        "coach", "rival", "grandmaster", "club_friend", "minimal"
+    ] | None = Field(default=None)
 
 
 class ChatResponse(BaseModel):
@@ -139,6 +143,7 @@ async def chat(
             request.limit,
             user_puzzle_history=history_context,
             user_profile_context=user_profile_context,
+            conversation_mode=request.conversation_mode,
         )
     except QueryValidationError as exc:
         raise HTTPException(

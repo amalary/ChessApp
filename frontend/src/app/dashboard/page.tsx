@@ -36,6 +36,12 @@ import {
   writeActiveLocalAuthUser,
   writeScopedStorageValue,
 } from '@/lib/dashboard-theme-settings';
+import {
+  ASSISTANT_CONVERSATION_MODE_OPTIONS,
+  readAssistantConversationMode,
+  writeAssistantConversationMode,
+  type AssistantConversationMode,
+} from '@/lib/assistant-conversation-mode';
 
 type NavItem = {
   label: string;
@@ -2206,6 +2212,8 @@ function SettingsPanel({
   onSecondaryColorChange,
   onGradientEnabledChange,
   onGradientDirectionChange,
+  assistantConversationMode,
+  onAssistantConversationModeChange,
   onAccentReset,
   onSaveTheme,
   hasUnsavedThemeChanges,
@@ -2225,6 +2233,8 @@ function SettingsPanel({
   onSecondaryColorChange: (nextColor: string) => void;
   onGradientEnabledChange: (enabled: boolean) => void;
   onGradientDirectionChange: (direction: GradientDirection) => void;
+  assistantConversationMode: AssistantConversationMode;
+  onAssistantConversationModeChange: (mode: AssistantConversationMode) => void;
   onAccentReset: () => void;
   onSaveTheme: () => void;
   hasUnsavedThemeChanges: boolean;
@@ -2310,6 +2320,36 @@ function SettingsPanel({
             </div>
           </article>
         </div>
+
+        <article className="mt-4 rounded-2xl neumo-inset px-4 py-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+            Assistant conversation mode
+          </p>
+          <p className="mt-1 text-sm text-slate-500">
+            Choose how the chess assistant speaks, paces hints, and structures guidance.
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {ASSISTANT_CONVERSATION_MODE_OPTIONS.map((option) => {
+              const isActive = assistantConversationMode === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => onAssistantConversationModeChange(option.value)}
+                  className={`rounded-2xl border px-3 py-2 text-left transition-all duration-200 ${
+                    isActive
+                      ? 'border-cyan-300/80 bg-cyan-50/75 shadow-[0_8px_16px_rgba(15,23,42,0.1)]'
+                      : 'border-slate-200/70 bg-white/80 hover:border-cyan-200/70'
+                  }`}
+                >
+                  <p className="text-sm font-semibold text-slate-700">{option.label}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">{option.tone}</p>
+                  <p className="mt-1 text-xs text-slate-600">&quot;{option.sample}&quot;</p>
+                </button>
+              );
+            })}
+          </div>
+        </article>
 
         <article className="mt-4 rounded-2xl border border-red-200/70 bg-red-50/70 px-4 py-4">
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-red-500">Delete account</p>
@@ -2607,6 +2647,8 @@ export default function DashboardPage() {
   });
   const [themeSavedNoticeVisible, setThemeSavedNoticeVisible] = useState(false);
   const [settingsStorageScope, setSettingsStorageScope] = useState<string | null>(null);
+  const [assistantConversationMode, setAssistantConversationMode] =
+    useState<AssistantConversationMode>('coach');
   const [difficultyBucketAnalytics, setDifficultyBucketAnalytics] =
     useState<DifficultyBucketAnalyticsData | null>(null);
   const [difficultyBucketAnalyticsLoading, setDifficultyBucketAnalyticsLoading] = useState(false);
@@ -2780,6 +2822,20 @@ export default function DashboardPage() {
       setTheme(storedThemeMode);
     }
   }, [setTheme, settingsStorageScope]);
+
+  useEffect(() => {
+    const syncAssistantConversationMode = () => {
+      setAssistantConversationMode(readAssistantConversationMode(settingsStorageScope));
+    };
+
+    syncAssistantConversationMode();
+    window.addEventListener('storage', syncAssistantConversationMode);
+    window.addEventListener('focus', syncAssistantConversationMode);
+    return () => {
+      window.removeEventListener('storage', syncAssistantConversationMode);
+      window.removeEventListener('focus', syncAssistantConversationMode);
+    };
+  }, [settingsStorageScope]);
 
   useEffect(() => {
     if (theme === 'light' || theme === 'dark') {
@@ -4155,6 +4211,7 @@ export default function DashboardPage() {
                 panelStyle={dashboardContainerStyle}
                 buttonStyle={dashboardButtonStyle}
                 isDark={isDark}
+                assistantConversationMode={assistantConversationMode}
               />
             )}
 
@@ -4203,6 +4260,11 @@ export default function DashboardPage() {
                   setThemeSavedNoticeVisible(false);
                   setGradientDirection(direction);
                 }}
+                assistantConversationMode={assistantConversationMode}
+                onAssistantConversationModeChange={(mode) => {
+                  setAssistantConversationMode(mode);
+                  writeAssistantConversationMode(settingsStorageScope, mode);
+                }}
                 onAccentReset={handleThemeReset}
                 onSaveTheme={handleSaveTheme}
                 hasUnsavedThemeChanges={hasUnsavedThemeChanges}
@@ -4212,7 +4274,13 @@ export default function DashboardPage() {
               />
             )}
 
-            {isAgentView && <AgentPage panelStyle={dashboardContainerStyle} />}
+            {isAgentView && (
+              <AgentPage
+                panelStyle={dashboardContainerStyle}
+                assistantConversationMode={assistantConversationMode}
+                submissions={submissions}
+              />
+            )}
 
             {!isDashboardView &&
               !isAnalyticsView &&

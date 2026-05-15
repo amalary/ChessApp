@@ -48,7 +48,7 @@ class ChessAssistantHistoryContextTests(unittest.TestCase):
             user_puzzle_history=[],
         )
         self.assertIn(
-            "Please solve or upload a puzzle first",
+            "Load a puzzle first",
             result.get("response_text", ""),
         )
 

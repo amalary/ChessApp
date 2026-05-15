@@ -214,6 +214,703 @@ body {
   .chess-stream-item {
     animation: chess-stream-in 360ms cubic-bezier(0.16, 1, 0.3, 1);
   }
+
+  .amy-solve-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 9999px;
+    padding: 7px 12px;
+    border: 1px solid rgba(100, 116, 139, 0.2);
+    background: rgba(248, 250, 252, 0.82);
+    box-shadow:
+      0 5px 16px rgba(15, 23, 42, 0.08),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .amy-solve-status--active {
+    animation: amy-solve-status-glow 2.8s ease-in-out infinite;
+  }
+
+  .amy-solve-status__dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 9999px;
+    background: rgba(2, 132, 199, 0.86);
+    box-shadow: 0 0 0 0 rgba(2, 132, 199, 0.28);
+    animation: amy-solve-dot-pulse 1.9s ease-out infinite;
+    flex-shrink: 0;
+  }
+
+  .amy-solve-typing {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(15, 23, 42, 0.64);
+  }
+
+  .amy-solve-typing::after {
+    content: "";
+    display: inline-block;
+    width: 1.2em;
+    text-align: left;
+    animation: chess-dots 1.1s steps(4, end) infinite;
+  }
+
+  .amy-chat-shell {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+  }
+
+  .amy-chat-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      linear-gradient(120deg, rgba(103, 232, 249, 0.08), rgba(167, 139, 250, 0.06) 42%, rgba(34, 211, 238, 0.04)),
+      radial-gradient(85% 60% at 8% 8%, rgba(255, 255, 255, 0.34), transparent 74%);
+    pointer-events: none;
+    opacity: 0.65;
+    z-index: 0;
+  }
+
+  .amy-chat-shell > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .amy-identity-mark {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    border-radius: 9999px;
+    border: 1px solid rgba(103, 232, 249, 0.4);
+    background: linear-gradient(145deg, rgba(12, 74, 110, 0.95), rgba(49, 46, 129, 0.94));
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.16) inset,
+      0 0 22px rgba(6, 182, 212, 0.24);
+    overflow: hidden;
+  }
+
+  .amy-identity-mark--sm {
+    width: 40px;
+    height: 40px;
+  }
+
+  .amy-identity-mark--md {
+    width: 46px;
+    height: 46px;
+  }
+
+  .amy-identity-mark__halo {
+    position: absolute;
+    inset: -30%;
+    border-radius: 9999px;
+    background: radial-gradient(circle at center, rgba(125, 211, 252, 0.42), transparent 64%);
+    filter: blur(4px);
+    animation: amy-halo-breathe 9s ease-in-out infinite;
+  }
+
+  .amy-identity-mark__core {
+    position: relative;
+    z-index: 2;
+    width: 24px;
+    height: 24px;
+    border-radius: 9999px;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(160deg, rgba(6, 182, 212, 0.65), rgba(129, 140, 248, 0.56));
+    box-shadow: 0 0 10px rgba(34, 211, 238, 0.28);
+  }
+
+  .amy-identity-mark__knight {
+    position: absolute;
+    right: 4px;
+    bottom: 3px;
+    z-index: 3;
+    width: 14px;
+    height: 14px;
+    border-radius: 9999px;
+    display: grid;
+    place-items: center;
+    background: rgba(15, 23, 42, 0.62);
+    border: 1px solid rgba(186, 230, 253, 0.44);
+    box-shadow: 0 0 7px rgba(103, 232, 249, 0.22);
+  }
+
+  .amy-identity-mark__pulse {
+    position: absolute;
+    inset: -18%;
+    border-radius: 9999px;
+    border: 1px solid rgba(103, 232, 249, 0.38);
+    opacity: 0;
+    animation: amy-mark-pulse 6.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  }
+
+  .amy-chat-stage__gradient,
+  .amy-chat-stage__veil,
+  .amy-chat-stage__haze,
+  .amy-chat-stage__glow,
+  .amy-chat-stage__grain,
+  .amy-chat-stage__silhouette,
+  .amy-chat-stage__particles {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .amy-chat-stage__gradient {
+    opacity: 0.54;
+    background:
+      radial-gradient(92% 125% at 6% 10%, rgba(186, 230, 253, 0.32), rgba(186, 230, 253, 0) 62%),
+      radial-gradient(75% 110% at 92% 12%, rgba(196, 181, 253, 0.25), rgba(196, 181, 253, 0) 64%),
+      linear-gradient(120deg, rgba(239, 246, 255, 0.3), rgba(238, 242, 255, 0.08), rgba(240, 249, 255, 0.24));
+    animation: amy-gradient-shift 34s ease-in-out infinite alternate;
+  }
+
+  .amy-chat-stage__veil {
+    opacity: 0.32;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.08) 32%, rgba(224, 242, 254, 0.12) 76%, rgba(186, 230, 253, 0.18)),
+      repeating-linear-gradient(155deg, rgba(15, 23, 42, 0.024) 0 2px, rgba(15, 23, 42, 0) 2px 15px);
+    animation: amy-veil-drift 38s ease-in-out infinite alternate;
+  }
+
+  .amy-chat-stage__haze {
+    opacity: 0.3;
+    background:
+      radial-gradient(70% 40% at 50% 84%, rgba(103, 232, 249, 0.16), transparent 72%),
+      radial-gradient(48% 28% at 22% 74%, rgba(167, 139, 250, 0.15), transparent 70%);
+    filter: blur(9px);
+    animation: amy-haze-drift 42s linear infinite alternate;
+  }
+
+  .amy-chat-stage__glow {
+    border-radius: 9999px;
+    filter: blur(20px);
+    opacity: 0.22;
+  }
+
+  .amy-chat-stage__glow--a {
+    inset: auto auto 14% -9%;
+    width: 52%;
+    height: 24%;
+    background: rgba(56, 189, 248, 0.38);
+    animation: amy-glow-float-a 30s ease-in-out infinite alternate;
+  }
+
+  .amy-chat-stage__glow--b {
+    inset: -8% -8% auto auto;
+    width: 42%;
+    height: 22%;
+    background: rgba(167, 139, 250, 0.34);
+    animation: amy-glow-float-b 36s ease-in-out infinite alternate;
+  }
+
+  .amy-chat-stage__grain {
+    opacity: 0.045;
+    background-image: radial-gradient(rgba(15, 23, 42, 0.68) 0.75px, transparent 0.75px);
+    background-size: 3px 3px;
+  }
+
+  .amy-chat-stage__silhouette {
+    opacity: 0.08;
+    mix-blend-mode: soft-light;
+    filter: blur(0.2px);
+  }
+
+  .amy-chat-stage__silhouette--queen {
+    inset: 10% auto auto 74%;
+    width: 90px;
+    height: 110px;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.1), rgba(15, 23, 42, 0.68));
+    clip-path: polygon(50% 0, 62% 10%, 74% 8%, 80% 18%, 67% 24%, 74% 46%, 69% 68%, 80% 88%, 20% 88%, 31% 68%, 26% 46%, 33% 24%, 20% 18%, 26% 8%, 38% 10%);
+    animation: amy-silhouette-queen 46s ease-in-out infinite;
+  }
+
+  .amy-chat-stage__silhouette--knight {
+    inset: auto auto 14% 4%;
+    width: 94px;
+    height: 100px;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.02), rgba(15, 23, 42, 0.6));
+    clip-path: polygon(18% 95%, 79% 95%, 84% 84%, 67% 78%, 72% 58%, 57% 49%, 64% 30%, 53% 19%, 38% 22%, 30% 35%, 38% 44%, 23% 51%, 21% 66%, 13% 74%);
+    animation: amy-silhouette-knight 48s ease-in-out infinite;
+  }
+
+  .amy-chat-stage__particles {
+    opacity: 0.26;
+    background-image:
+      radial-gradient(circle at 12% 18%, rgba(240, 249, 255, 0.7) 0.9px, transparent 1.2px),
+      radial-gradient(circle at 34% 86%, rgba(224, 242, 254, 0.52) 1px, transparent 1.3px),
+      radial-gradient(circle at 62% 27%, rgba(216, 180, 254, 0.44) 0.95px, transparent 1.2px),
+      radial-gradient(circle at 82% 74%, rgba(186, 230, 253, 0.5) 0.9px, transparent 1.3px),
+      radial-gradient(circle at 91% 36%, rgba(209, 213, 255, 0.42) 0.95px, transparent 1.2px);
+    animation: amy-particle-drift 52s linear infinite;
+  }
+
+  .amy-chat-header {
+    position: relative;
+    border-radius: 18px;
+    padding: 2px 2px 6px;
+  }
+
+  .amy-chat-header::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 1px;
+    background: linear-gradient(90deg, rgba(6, 182, 212, 0), rgba(6, 182, 212, 0.3), rgba(99, 102, 241, 0.24), rgba(6, 182, 212, 0));
+    opacity: 0.72;
+    pointer-events: none;
+  }
+
+  .amy-presence-pill {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 9999px;
+    border: 1px solid rgba(34, 197, 94, 0.36);
+    background: linear-gradient(140deg, rgba(240, 253, 244, 0.82), rgba(220, 252, 231, 0.58));
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(22, 101, 52, 0.88);
+    box-shadow: 0 0 16px rgba(74, 222, 128, 0.18);
+  }
+
+  .amy-presence-pill::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 9999px;
+    background: rgba(34, 197, 94, 0.9);
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.7);
+    animation: amy-presence-pulse 3.6s ease-in-out infinite;
+  }
+
+  .amy-chat-bubble {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border: 1px solid rgba(125, 211, 252, 0.24);
+    background: linear-gradient(138deg, rgba(15, 23, 42, 0.88), rgba(30, 41, 59, 0.78));
+    color: rgba(241, 245, 249, 0.98);
+    box-shadow:
+      0 16px 30px rgba(2, 6, 23, 0.34),
+      inset 0 0 0 1px rgba(226, 232, 240, 0.06);
+    backdrop-filter: blur(16px) saturate(1.1);
+    transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+  }
+
+  .amy-chat-bubble::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0) 42%);
+    z-index: -1;
+  }
+
+  .amy-chat-bubble--assistant {
+    border-color: rgba(103, 232, 249, 0.28);
+    box-shadow:
+      0 16px 30px rgba(2, 6, 23, 0.34),
+      0 0 0 1px rgba(34, 211, 238, 0.12),
+      0 0 26px rgba(34, 211, 238, 0.1);
+  }
+
+  .amy-chat-bubble--user {
+    border-color: rgba(167, 139, 250, 0.32);
+    background: linear-gradient(138deg, rgba(49, 46, 129, 0.84), rgba(30, 41, 59, 0.82));
+    box-shadow:
+      0 16px 30px rgba(2, 6, 23, 0.36),
+      0 0 0 1px rgba(139, 92, 246, 0.12),
+      0 0 28px rgba(139, 92, 246, 0.11);
+  }
+
+  .amy-chat-bubble--error {
+    border-color: rgba(251, 113, 133, 0.42);
+    background: linear-gradient(138deg, rgba(127, 29, 29, 0.78), rgba(51, 65, 85, 0.8));
+    box-shadow:
+      0 16px 30px rgba(2, 6, 23, 0.36),
+      0 0 22px rgba(251, 113, 133, 0.14);
+  }
+
+  .amy-chat-bubble__speaker {
+    color: rgba(165, 243, 252, 0.9);
+    text-shadow: 0 0 14px rgba(103, 232, 249, 0.26);
+  }
+
+  .amy-chat-bubble__time {
+    color: rgba(186, 230, 253, 0.8);
+  }
+
+  .amy-chat-input-shell {
+    border: 1px solid rgba(100, 116, 139, 0.36);
+    background:
+      linear-gradient(140deg, rgba(15, 23, 42, 0.74), rgba(30, 41, 59, 0.7)),
+      radial-gradient(80% 85% at 12% 6%, rgba(125, 211, 252, 0.1), rgba(125, 211, 252, 0));
+    box-shadow:
+      0 18px 34px rgba(2, 6, 23, 0.3),
+      inset 0 0 0 1px rgba(226, 232, 240, 0.06);
+    backdrop-filter: blur(18px);
+    transition: border-color 220ms ease, box-shadow 220ms ease, transform 220ms ease;
+  }
+
+  .amy-chat-input-shell:hover {
+    border-color: rgba(56, 189, 248, 0.45);
+    box-shadow:
+      0 20px 36px rgba(2, 6, 23, 0.34),
+      0 0 0 1px rgba(56, 189, 248, 0.12),
+      0 0 24px rgba(56, 189, 248, 0.1);
+  }
+
+  .amy-chat-input-wrap {
+    position: relative;
+    flex: 1;
+  }
+
+  .amy-chat-input-wrap::before {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border-radius: 18px;
+    background: radial-gradient(circle at 18% 12%, rgba(125, 211, 252, 0.35), rgba(99, 102, 241, 0.08) 50%, rgba(99, 102, 241, 0));
+    opacity: 0;
+    transition: opacity 220ms ease;
+    pointer-events: none;
+  }
+
+  .amy-chat-input-wrap:hover::before,
+  .amy-chat-input-wrap:focus-within::before {
+    opacity: 1;
+  }
+
+  .amy-chat-input {
+    border: 1px solid rgba(148, 163, 184, 0.42);
+    background: linear-gradient(145deg, rgba(15, 23, 42, 0.88), rgba(30, 41, 59, 0.76));
+    color: rgba(248, 250, 252, 0.98);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 7px 18px rgba(2, 6, 23, 0.28);
+    transition: border-color 220ms ease, box-shadow 220ms ease, transform 220ms ease;
+  }
+
+  .amy-chat-input::placeholder {
+    color: rgba(186, 230, 253, 0.7);
+  }
+
+  .amy-chat-input:hover {
+    border-color: rgba(56, 189, 248, 0.5);
+  }
+
+  .amy-chat-input:focus {
+    border-color: rgba(56, 189, 248, 0.72);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 0 0 2px rgba(56, 189, 248, 0.22),
+      0 0 28px rgba(56, 189, 248, 0.22);
+  }
+
+  .amy-chat-send-btn {
+    border: 1px solid rgba(56, 189, 248, 0.38);
+    background: linear-gradient(115deg, rgba(99, 102, 241, 0.92), rgba(6, 182, 212, 0.86));
+    color: rgb(248, 250, 252);
+    box-shadow:
+      0 10px 20px rgba(2, 6, 23, 0.32),
+      inset 0 0 0 1px rgba(224, 242, 254, 0.16);
+    transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+  }
+
+  .amy-chat-send-btn:hover:not(:disabled) {
+    transform: translateY(-1px) scale(1.01);
+    border-color: rgba(125, 211, 252, 0.62);
+    box-shadow:
+      0 14px 24px rgba(2, 6, 23, 0.34),
+      0 0 22px rgba(56, 189, 248, 0.24);
+  }
+
+  .amy-chat-send-btn:active:not(:disabled) {
+    transform: translateY(0) scale(0.98);
+  }
+
+  .amy-chat-send-btn:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px rgba(125, 211, 252, 0.46),
+      0 12px 24px rgba(2, 6, 23, 0.34);
+  }
+
+  .amy-chat-send-btn--ready {
+    animation: amy-send-ready-pulse 2.6s ease-in-out infinite;
+  }
+
+  .amy-chat-send-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+    filter: saturate(0.85);
+    box-shadow: 0 8px 16px rgba(2, 6, 23, 0.24);
+  }
+
+  .cinematic-amy-scene {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+  }
+
+  .amy-scene-atmosphere {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .amy-scene-atmosphere__orb {
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(56px);
+    opacity: 0.34;
+    will-change: transform;
+  }
+
+  .amy-scene-atmosphere__orb--a {
+    width: 48vw;
+    height: 48vw;
+    max-width: 520px;
+    max-height: 520px;
+    left: -16vw;
+    top: -18vh;
+    background: rgba(56, 189, 248, 0.26);
+    animation: amy-orb-drift-a 28s ease-in-out infinite alternate;
+  }
+
+  .amy-scene-atmosphere__orb--b {
+    width: 42vw;
+    height: 42vw;
+    max-width: 420px;
+    max-height: 420px;
+    right: -14vw;
+    top: 10vh;
+    background: rgba(129, 140, 248, 0.22);
+    animation: amy-orb-drift-b 34s ease-in-out infinite alternate;
+  }
+
+  .amy-scene-atmosphere__orb--c {
+    width: 34vw;
+    height: 34vw;
+    max-width: 360px;
+    max-height: 360px;
+    left: 24vw;
+    bottom: -14vh;
+    background: rgba(244, 114, 182, 0.18);
+    animation: amy-orb-drift-c 26s ease-in-out infinite alternate;
+  }
+
+  .solve-cinematic-shell {
+    position: relative;
+    z-index: 1;
+    perspective: 1200px;
+  }
+
+  .solve-cinematic-panel {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    backdrop-filter: blur(14px) saturate(1.08);
+    transform:
+      rotateX(calc(var(--amy-parallax-y, 0px) * -0.08deg))
+      rotateY(calc(var(--amy-parallax-x, 0px) * 0.1deg))
+      translateZ(0);
+    transition: transform 180ms ease;
+  }
+
+  .solve-cinematic-panel > * {
+    position: relative;
+    z-index: 2;
+  }
+
+  .solve-cinematic-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .solve-cinematic-layer--back {
+    background:
+      radial-gradient(90% 100% at 16% 12%, rgba(186, 230, 253, 0.26), transparent 70%),
+      radial-gradient(80% 70% at 82% 84%, rgba(196, 181, 253, 0.22), transparent 72%);
+    opacity: 0.62;
+    transform: translate3d(calc(var(--amy-parallax-x, 0px) * -0.2), calc(var(--amy-parallax-y, 0px) * -0.2), 0);
+  }
+
+  .solve-cinematic-layer--mid {
+    background:
+      linear-gradient(140deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.04) 42%, rgba(224, 242, 254, 0.14) 100%),
+      repeating-linear-gradient(160deg, rgba(15, 23, 42, 0.02) 0 2px, rgba(15, 23, 42, 0) 2px 16px);
+    opacity: 0.34;
+    transform: translate3d(calc(var(--amy-parallax-x, 0px) * 0.12), calc(var(--amy-parallax-y, 0px) * 0.12), 0);
+  }
+
+  .solve-cinematic-layer--front {
+    background:
+      radial-gradient(80% 34% at 52% 110%, rgba(56, 189, 248, 0.18), transparent 72%),
+      radial-gradient(40% 22% at 90% -2%, rgba(167, 139, 250, 0.18), transparent 78%);
+    mix-blend-mode: screen;
+    opacity: 0.5;
+    transform: translate3d(calc(var(--amy-parallax-x, 0px) * 0.26), calc(var(--amy-parallax-y, 0px) * 0.18), 0);
+  }
+
+  .solve-cinematic-shell--active .solve-cinematic-layer--back {
+    animation: solve-layer-breathe-back 4.6s ease-in-out infinite;
+  }
+
+  .solve-cinematic-shell--active .solve-cinematic-layer--front {
+    animation: solve-layer-breathe-front 3.8s ease-in-out infinite;
+  }
+
+  .solve-cinematic-solution {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    box-shadow:
+      0 18px 34px rgba(15, 23, 42, 0.14),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  }
+
+  .chess-board-shell {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .chess-board-shell::after {
+    content: "";
+    position: absolute;
+    inset: 8%;
+    border-radius: 18px;
+    pointer-events: none;
+    border: 1px solid rgba(186, 230, 253, 0.24);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  }
+
+  .chess-board-stage::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(60% 42% at 24% 12%, rgba(255, 255, 255, 0.18), transparent 72%),
+      linear-gradient(180deg, rgba(15, 23, 42, 0.03), rgba(15, 23, 42, 0.28));
+    z-index: 1;
+    mix-blend-mode: soft-light;
+  }
+
+  .chess-board-image {
+    transform: scale(1.01);
+    filter: saturate(1.04) contrast(1.02);
+  }
+
+  .chess-board-intelligence {
+    z-index: 3;
+  }
+
+  .chess-intel-path-line {
+    fill: none;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-dasharray: 6 4;
+    filter: drop-shadow(0 0 7px rgba(56, 189, 248, 0.42));
+    animation: chess-intel-path-flow 1.6s linear infinite;
+  }
+
+  .chess-intel-path-dot {
+    fill: rgba(244, 114, 182, 0.92);
+    filter: drop-shadow(0 0 9px rgba(244, 114, 182, 0.5));
+    animation: chess-intel-target-pulse 1.8s ease-in-out infinite;
+  }
+
+  .chess-square-cell {
+    position: relative;
+    z-index: 2;
+  }
+
+  .chess-square-cell--source {
+    box-shadow:
+      inset 0 0 0 1px rgba(56, 189, 248, 0.45),
+      0 0 0 1px rgba(56, 189, 248, 0.25);
+  }
+
+  .chess-square-cell--target {
+    box-shadow:
+      inset 0 0 0 1px rgba(34, 211, 238, 0.48),
+      inset 0 0 18px rgba(56, 189, 248, calc(0.22 + var(--amy-board-pressure, 0.3) * 0.2));
+  }
+
+  .chess-square-cell--danger {
+    animation: chess-danger-square 2.2s ease-in-out infinite;
+    box-shadow:
+      inset 0 0 0 1px rgba(251, 113, 133, 0.6),
+      inset 0 0 20px rgba(251, 113, 133, 0.3);
+  }
+
+  .amy-solve-status--intense {
+    border-color: rgba(56, 189, 248, 0.34);
+    box-shadow:
+      0 8px 18px rgba(14, 116, 144, 0.1),
+      inset 0 0 0 1px rgba(125, 211, 252, 0.26);
+  }
+
+  .chess-eval-shell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 9999px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background: rgba(255, 255, 255, 0.46);
+    padding: 5px 10px;
+    width: fit-content;
+  }
+
+  .chess-eval-line {
+    position: relative;
+    width: 160px;
+    max-width: 52vw;
+    height: 7px;
+    border-radius: 9999px;
+    overflow: hidden;
+    background: rgba(15, 23, 42, 0.1);
+  }
+
+  .chess-eval-line__fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, rgba(56, 189, 248, 0.9), rgba(99, 102, 241, 0.88), rgba(244, 114, 182, 0.85));
+    transition: width 500ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .chess-eval-pulse {
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    background: rgba(56, 189, 248, 0.52);
+    box-shadow: 0 0 0 rgba(56, 189, 248, 0);
+  }
+
+  .chess-eval-pulse--active {
+    animation: chess-eval-pulse 1.9s ease-out infinite;
+  }
 }
 
 @keyframes chess-piece-slide {
@@ -309,12 +1006,336 @@ body {
   }
 }
 
+@keyframes amy-gradient-shift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-1.2%, 0.8%, 0) scale(1.012);
+  }
+  100% {
+    transform: translate3d(1.1%, -0.9%, 0) scale(1.016);
+  }
+}
+
+@keyframes amy-solve-status-glow {
+  0% {
+    box-shadow:
+      0 5px 16px rgba(14, 116, 144, 0.07),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.32);
+  }
+  50% {
+    box-shadow:
+      0 8px 20px rgba(14, 116, 144, 0.12),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.38);
+  }
+  100% {
+    box-shadow:
+      0 5px 16px rgba(14, 116, 144, 0.07),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.32);
+  }
+}
+
+@keyframes amy-solve-dot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(2, 132, 199, 0.28);
+    transform: scale(0.96);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(2, 132, 199, 0);
+    transform: scale(1.04);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(2, 132, 199, 0);
+    transform: scale(0.96);
+  }
+}
+
+@keyframes amy-haze-drift {
+  0% {
+    transform: translate3d(-1.2%, 0.6%, 0);
+  }
+  50% {
+    transform: translate3d(0.8%, -0.6%, 0);
+  }
+  100% {
+    transform: translate3d(1.5%, 0.9%, 0);
+  }
+}
+
+@keyframes amy-veil-drift {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(1%, -1%, 0);
+  }
+}
+
+@keyframes amy-glow-float-a {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(8%, -4%, 0) scale(1.06);
+  }
+}
+
+@keyframes amy-glow-float-b {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(-10%, 5%, 0) scale(1.08);
+  }
+}
+
+@keyframes amy-particle-drift {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(-1.2%, 1%, 0);
+  }
+  100% {
+    transform: translate3d(1.4%, -0.8%, 0);
+  }
+}
+
+@keyframes amy-presence-pulse {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.75;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+}
+
+@keyframes amy-silhouette-queen {
+  0% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.07;
+  }
+  50% {
+    transform: translate3d(-2px, 1px, 0);
+    opacity: 0.095;
+  }
+  100% {
+    transform: translate3d(1px, -1px, 0);
+    opacity: 0.08;
+  }
+}
+
+@keyframes amy-silhouette-knight {
+  0% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.08;
+  }
+  50% {
+    transform: translate3d(2px, -1px, 0);
+    opacity: 0.09;
+  }
+  100% {
+    transform: translate3d(-2px, 1px, 0);
+    opacity: 0.075;
+  }
+}
+
+@keyframes amy-halo-breathe {
+  0% {
+    transform: scale(0.96);
+    opacity: 0.34;
+  }
+  50% {
+    transform: scale(1.04);
+    opacity: 0.52;
+  }
+  100% {
+    transform: scale(0.98);
+    opacity: 0.36;
+  }
+}
+
+@keyframes amy-mark-pulse {
+  0% {
+    transform: scale(0.86);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.4;
+  }
+  72% {
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.2);
+    opacity: 0;
+  }
+}
+
+@keyframes amy-send-ready-pulse {
+  0% {
+    box-shadow:
+      0 10px 20px rgba(2, 6, 23, 0.32),
+      inset 0 0 0 1px rgba(224, 242, 254, 0.16),
+      0 0 0 rgba(56, 189, 248, 0);
+  }
+  50% {
+    box-shadow:
+      0 12px 22px rgba(2, 6, 23, 0.36),
+      inset 0 0 0 1px rgba(224, 242, 254, 0.2),
+      0 0 22px rgba(56, 189, 248, 0.26);
+  }
+  100% {
+    box-shadow:
+      0 10px 20px rgba(2, 6, 23, 0.32),
+      inset 0 0 0 1px rgba(224, 242, 254, 0.16),
+      0 0 0 rgba(56, 189, 248, 0);
+  }
+}
+
+@keyframes amy-orb-drift-a {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(4vw, 3vh, 0) scale(1.08);
+  }
+}
+
+@keyframes amy-orb-drift-b {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(-3vw, -2vh, 0) scale(1.06);
+  }
+}
+
+@keyframes amy-orb-drift-c {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(2vw, -3vh, 0) scale(1.1);
+  }
+}
+
+@keyframes solve-layer-breathe-back {
+  0% {
+    opacity: 0.56;
+  }
+  50% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 0.56;
+  }
+}
+
+@keyframes solve-layer-breathe-front {
+  0% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.58;
+  }
+  100% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes chess-intel-path-flow {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -20;
+  }
+}
+
+@keyframes chess-intel-target-pulse {
+  0% {
+    transform: scale(0.88);
+    opacity: 0.74;
+  }
+  55% {
+    transform: scale(1.16);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.92);
+    opacity: 0.78;
+  }
+}
+
+@keyframes chess-danger-square {
+  0% {
+    background-color: rgba(251, 113, 133, 0.08);
+  }
+  50% {
+    background-color: rgba(251, 113, 133, 0.24);
+  }
+  100% {
+    background-color: rgba(251, 113, 133, 0.08);
+  }
+}
+
+@keyframes chess-eval-pulse {
+  0% {
+    transform: scale(0.92);
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.46);
+  }
+  75% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 9px rgba(56, 189, 248, 0);
+  }
+  100% {
+    transform: scale(0.94);
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chess-status-done,
   .chess-status-done-sheen,
   .chess-done-check,
   .chess-stream-item {
     animation: none !important;
+  }
+
+  .amy-chat-stage__gradient,
+  .amy-chat-stage__veil,
+  .amy-chat-stage__haze,
+  .amy-chat-stage__glow,
+  .amy-chat-stage__particles,
+  .amy-chat-stage__silhouette,
+  .amy-identity-mark__halo,
+  .amy-identity-mark__pulse,
+  .amy-presence-pill::before,
+  .amy-solve-status--active,
+  .amy-solve-status__dot,
+  .amy-solve-typing::after,
+  .amy-chat-send-btn--ready,
+  .amy-scene-atmosphere__orb,
+  .solve-cinematic-shell--active .solve-cinematic-layer--back,
+  .solve-cinematic-shell--active .solve-cinematic-layer--front,
+  .chess-intel-path-line,
+  .chess-intel-path-dot,
+  .chess-square-cell--danger,
+  .chess-eval-pulse--active {
+    animation: none !important;
+  }
+
+  .solve-cinematic-panel {
+    transform: none !important;
+    transition: none !important;
   }
 }
 
@@ -349,6 +1370,89 @@ body {
 .dark .dashboard-theme [class~='border-slate-200/70'],
 .dark .dashboard-theme [class~='border-slate-200'] {
   border-color: rgba(71, 85, 105, 0.72) !important;
+}
+
+.dark .amy-chat-shell::before {
+  opacity: 0.42;
+  background:
+    linear-gradient(120deg, rgba(8, 145, 178, 0.16), rgba(79, 70, 229, 0.12) 42%, rgba(14, 116, 144, 0.09)),
+    radial-gradient(80% 55% at 6% 8%, rgba(15, 23, 42, 0.36), transparent 76%);
+}
+
+.dark .amy-chat-stage__gradient {
+  opacity: 0.34;
+}
+
+.dark .amy-chat-stage__veil {
+  opacity: 0.16;
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.25), rgba(15, 23, 42, 0.03) 32%, rgba(30, 41, 59, 0.08) 76%, rgba(15, 23, 42, 0.2)),
+    repeating-linear-gradient(155deg, rgba(148, 163, 184, 0.04) 0 2px, rgba(148, 163, 184, 0) 2px 15px);
+}
+
+.dark .amy-chat-stage__haze {
+  opacity: 0.24;
+}
+
+.dark .amy-chat-stage__grain {
+  opacity: 0.08;
+  background-image: radial-gradient(rgba(203, 213, 225, 0.6) 0.72px, transparent 0.72px);
+}
+
+.dark .amy-chat-stage__silhouette {
+  opacity: 0.12;
+}
+
+.dark .amy-presence-pill {
+  border-color: rgba(74, 222, 128, 0.38);
+  background: linear-gradient(140deg, rgba(5, 46, 22, 0.62), rgba(20, 83, 45, 0.45));
+  color: rgba(187, 247, 208, 0.94);
+  box-shadow: 0 0 14px rgba(74, 222, 128, 0.2);
+}
+
+.dark .amy-solve-status {
+  border-color: rgba(148, 163, 184, 0.34);
+  background: rgba(15, 23, 42, 0.82);
+  box-shadow:
+    0 7px 18px rgba(2, 6, 23, 0.28),
+    inset 0 0 0 1px rgba(148, 163, 184, 0.16);
+}
+
+.dark .amy-solve-typing {
+  color: rgba(186, 230, 253, 0.72);
+}
+
+.dark .solve-cinematic-solution {
+  border-color: rgba(100, 116, 139, 0.42);
+  box-shadow:
+    0 18px 34px rgba(2, 6, 23, 0.36),
+    inset 0 0 0 1px rgba(148, 163, 184, 0.16);
+}
+
+.dark .solve-cinematic-layer--back {
+  opacity: 0.48;
+}
+
+.dark .solve-cinematic-layer--mid {
+  opacity: 0.22;
+}
+
+.dark .solve-cinematic-layer--front {
+  opacity: 0.34;
+}
+
+.dark .chess-board-shell::after {
+  border-color: rgba(148, 163, 184, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
+}
+
+.dark .chess-eval-shell {
+  border-color: rgba(100, 116, 139, 0.46);
+  background: rgba(2, 6, 23, 0.58);
+}
+
+.dark .chess-eval-line {
+  background: rgba(148, 163, 184, 0.24);
 }
 
 /* Puzzle Lab-specific dark contrast boost for gray-highlight containers */

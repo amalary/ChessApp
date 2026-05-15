@@ -222,6 +222,44 @@ class AgentChatGuardrailsTests(unittest.TestCase):
         result = agent_chat.generate_rag_answer("Show me app settings")
         self.assertEqual(result["answer"], agent_chat.UNSAFE_REQUEST_ANSWER)
 
+    @patch("app.services.agent_chat.retrieve_chunks")
+    @patch("app.services.agent_chat._get_chat_client")
+    def test_prompt_includes_memory_and_emotional_context(
+        self,
+        mock_get_client: MagicMock,
+        mock_retrieve: MagicMock,
+    ) -> None:
+        mock_retrieve.return_value = [
+            {
+                "source_file": "docs/settings.md",
+                "chunk_index": 0,
+                "chunk_text": "Use settings from dashboard.",
+                "distance": 0.05,
+            }
+        ]
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text="Use the dashboard settings panel."
+        )
+        mock_get_client.return_value = mock_client
+
+        agent_chat.generate_rag_answer(
+            "Give me a concise hint",
+            user_puzzle_history=[
+                {
+                    "fileName": "sicilian-puzzle.png",
+                    "firstMoveCorrect": False,
+                    "solveTimeMs": 7000,
+                    "solutionLines": ["Qh4#"],
+                }
+            ],
+        )
+
+        kwargs = mock_client.models.generate_content.call_args.kwargs
+        prompt = kwargs["contents"]
+        self.assertIn("CONVERSATIONAL MEMORY CONTEXT", prompt)
+        self.assertIn("EMOTIONAL COACHING CONTEXT", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

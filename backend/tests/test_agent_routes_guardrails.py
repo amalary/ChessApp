@@ -82,10 +82,17 @@ class AgentRoutesGuardrailsTests(unittest.TestCase):
 
         response = self.client.post(
             "/agent/chat",
-            json={"query": "What is my profile data?"},
+            json={
+                "query": "What is my profile data?",
+                "conversation_mode": "grandmaster",
+            },
             headers={"X-Local-Auth-User-Id": str(user_id)},
         )
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            mock_generate_rag_answer.call_args.kwargs["conversation_mode"],
+            "grandmaster",
+        )
         profile_context = mock_generate_rag_answer.call_args.kwargs[
             "user_profile_context"
         ]

@@ -8,12 +8,23 @@ import chess
 from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, START, StateGraph
 
+from app.services.assistant_personality import (
+    AssistantConversationMode,
+    apply_personality,
+    normalize_conversation_mode,
+)
+from app.services.coaching_memory import (
+    build_conversational_memory,
+    build_emotional_context,
+    build_memory_reference,
+)
+
 APP_FEATURE_HELP = {
-    "analytics": "Analytics highlights your solve accuracy, first-move quality, and trend over recent puzzles.",
-    "puzzle lab": "Puzzle Lab helps you practice targeted motifs by selecting curated tactical puzzle sets.",
-    "training": "Training focuses on repetitive tactical reps so you can build pattern recognition and faster calculation.",
-    "history": "Puzzle history stores your recent solves, themes, confidence, and move accuracy for review.",
-    "dashboard": "Dashboard gives a quick snapshot of solved count, streaks, and current improvement signals.",
+    "analytics": "Analytics shows how clean your solves are and where you leak points.",
+    "puzzle lab": "Puzzle Lab lets you train specific tactical patterns on demand.",
+    "training": "Training mode is for reps: faster pattern recognition, better conversion.",
+    "history": "History keeps your recent puzzles, key themes, and first-move results.",
+    "dashboard": "Dashboard gives the quick form check: volume, accuracy, and trend.",
 }
 
 ALLOWED_TOOLS = {
@@ -67,6 +78,18 @@ MOVE_TOKEN_PATTERN = re.compile(
 )
 
 ALLOWED_MODES = {"hint", "explain", "theme", "followup"}
+FULL_LINE_REQUEST_PHRASES = (
+    "full line",
+    "full solution",
+    "full answer",
+    "show the line",
+    "reveal the line",
+    "just tell me",
+    "give me the answer",
+    "give the answer",
+    "show the answer",
+    "what is the answer",
+)
 
 
 def _contains_any(text: str, options: tuple[str, ...]) -> bool:
@@ -87,6 +110,7 @@ class ChessAssistantState(TypedDict, total=False):
     fen: str | None
     solver_move_san: str | None
     solver_line: list[str]
+    coaching_stage: int | None
     user_message: str
     requested_mode: Literal["hint", "explain", "theme", "followup"]
     legal_moves: list[str]
@@ -101,6 +125,9 @@ class ChessAssistantState(TypedDict, total=False):
     checkmate_verified: bool
     user_puzzle_history: list[dict[str, Any]]
     user_profile_context: dict[str, Any] | None
+    coaching_memory: dict[str, Any] | None
+    emotional_context: dict[str, Any] | None
+    conversation_mode: AssistantConversationMode
 
 
 @dataclass
@@ -132,14 +159,17 @@ class ChessAssistantAgent:
         fen: str | None,
         solver_move_san: str | None,
         solver_line: list[str] | None,
+        coaching_stage: int | None = None,
         user_message: str,
         requested_mode: str,
+        conversation_mode: str | None = None,
         user_puzzle_history: list[dict[str, Any]] | None = None,
         user_profile_context: dict[str, Any] | None = None,
     ) -> ChessAssistantState:
         mode = requested_mode.strip().lower() if isinstance(requested_mode, str) else ""
         if mode not in ALLOWED_MODES:
             mode = "followup"
+        normalized_conversation_mode = normalize_conversation_mode(conversation_mode)
 
         initial_state: ChessAssistantState = {
             "user_id": user_id,
@@ -159,6 +189,11 @@ class ChessAssistantAgent:
                 for move in (solver_line or [])
                 if isinstance(move, str) and move.strip()
             ],
+            "coaching_stage": (
+                int(coaching_stage)
+                if isinstance(coaching_stage, int) and 1 <= int(coaching_stage) <= 5
+                else None
+            ),
             "user_message": user_message if isinstance(user_message, str) else "",
             "requested_mode": cast(
                 Literal["hint", "explain", "theme", "followup"], mode
@@ -177,6 +212,9 @@ class ChessAssistantAgent:
             "user_profile_context": (
                 user_profile_context if isinstance(user_profile_context, dict) else None
             ),
+            "coaching_memory": None,
+            "emotional_context": None,
+            "conversation_mode": normalized_conversation_mode,
         }
         result = self.graph.invoke(initial_state)
         return cast(ChessAssistantState, result)
@@ -188,6 +226,7 @@ class ChessAssistantAgent:
         workflow.add_node("detect_prompt_injection", self.detect_prompt_injection)
         workflow.add_node("classify_intent", self.classify_intent)
         workflow.add_node("load_puzzle_context", self.load_puzzle_context)
+        workflow.add_node("build_coaching_context", self.build_coaching_context)
         workflow.add_node("validate_position", self.validate_position)
         workflow.add_node("analyze_position", self.analyze_position)
         workflow.add_node("generate_hint", self.generate_hint)
@@ -207,7 +246,8 @@ class ChessAssistantAgent:
             },
         )
         workflow.add_edge("classify_intent", "load_puzzle_context")
-        workflow.add_edge("load_puzzle_context", "validate_position")
+        workflow.add_edge("load_puzzle_context", "build_coaching_context")
+        workflow.add_edge("build_coaching_context", "validate_position")
         workflow.add_edge("validate_position", "analyze_position")
         workflow.add_conditional_edges(
             "analyze_position",
@@ -243,6 +283,12 @@ class ChessAssistantAgent:
             "solver_move_san": (state.get("solver_move_san") or "").strip() or None,
             "fen": (state.get("fen") or "").strip() or None,
             "solver_line": [move for move in state.get("solver_line", []) if move],
+            "coaching_stage": (
+                int(state.get("coaching_stage"))
+                if isinstance(state.get("coaching_stage"), int)
+                and 1 <= int(state.get("coaching_stage")) <= 5
+                else None
+            ),
             "user_puzzle_history": [
                 item
                 for item in state.get("user_puzzle_history", [])
@@ -253,6 +299,31 @@ class ChessAssistantAgent:
                 if isinstance(state.get("user_profile_context"), dict)
                 else None
             ),
+            "coaching_memory": (
+                state.get("coaching_memory")
+                if isinstance(state.get("coaching_memory"), dict)
+                else None
+            ),
+            "emotional_context": (
+                state.get("emotional_context")
+                if isinstance(state.get("emotional_context"), dict)
+                else None
+            ),
+            "conversation_mode": normalize_conversation_mode(
+                cast(str | None, state.get("conversation_mode"))
+            ),
+        }
+
+    def build_coaching_context(self, state: ChessAssistantState) -> ChessAssistantState:
+        memory = build_conversational_memory(
+            history=state.get("user_puzzle_history", []),
+            user_message=state.get("user_message", ""),
+        )
+        emotional = build_emotional_context(memory)
+        return {
+            **state,
+            "coaching_memory": memory,
+            "emotional_context": emotional,
         }
 
     def detect_prompt_injection(
@@ -272,7 +343,7 @@ class ChessAssistantAgent:
                 **state,
                 "guardrail_triggered": True,
                 "guardrail_reason": "prompt_injection_detected",
-                "response_text": "I can help with the chess puzzle, but I can\u2019t follow instructions that try to override the assistant\u2019s rules.",
+                "response_text": "I can help with chess. I won\u2019t follow override or prompt-hacking instructions.",
                 "confidence": 1.0,
             }
 
@@ -282,7 +353,7 @@ class ChessAssistantAgent:
                 **state,
                 "guardrail_triggered": True,
                 "guardrail_reason": f"tool_not_allowlisted:{requested_tool}",
-                "response_text": "I can help with puzzle analysis, but I can only use approved chess-safe tools.",
+                "response_text": "I can analyze the position, but only with approved chess-safe tools.",
                 "confidence": 1.0,
             }
 
@@ -295,6 +366,18 @@ class ChessAssistantAgent:
         intent = requested_mode
         if requested_mode == "followup":
             if "hint" in message:
+                intent = "hint"
+            elif any(
+                cue in message
+                for cue in (
+                    "candidate move",
+                    "forcing move",
+                    "first forcing move",
+                    "overloaded",
+                    "full line",
+                    "full answer",
+                )
+            ):
                 intent = "hint"
             elif "theme" in message or "tactic" in message:
                 intent = "theme"
@@ -312,12 +395,7 @@ class ChessAssistantAgent:
 
         hydrated_state = self._hydrate_context_from_history(state)
         mode = state.get("requested_mode", "followup")
-        message = state.get("user_message", "").lower()
-        asks_only_app_help = any(topic in message for topic in APP_FEATURE_HELP)
-
-        requires_position = (
-            mode in {"hint", "explain", "theme"} or not asks_only_app_help
-        )
+        requires_position = mode in {"hint", "explain", "theme"}
 
         if not requires_position:
             return hydrated_state
@@ -326,7 +404,7 @@ class ChessAssistantAgent:
             return self._helpful_missing_context(
                 hydrated_state,
                 reason="missing_fen",
-                message="Please solve or upload a puzzle first so I have a FEN to analyze.",
+                message="Load a puzzle first. I need the position (FEN).",
             )
 
         if not hydrated_state.get("solver_move_san") and not hydrated_state.get(
@@ -335,7 +413,7 @@ class ChessAssistantAgent:
             return self._helpful_missing_context(
                 hydrated_state,
                 reason="missing_solver_output",
-                message="Please solve a puzzle first so I can explain the verified best move and line.",
+                message="Solve the puzzle first. Then I can explain the best move and line.",
             )
 
         return hydrated_state
@@ -393,7 +471,7 @@ class ChessAssistantAgent:
             return self._helpful_missing_context(
                 state,
                 reason="invalid_fen",
-                message="The current puzzle position is invalid. Please upload/solve the puzzle again.",
+                message="This position is invalid. Reload the puzzle and try again.",
             )
 
         return {
@@ -429,7 +507,7 @@ class ChessAssistantAgent:
                 return self._helpful_missing_context(
                     next_state,
                     reason="illegal_solver_move",
-                    message="The stored solver move is not legal in this position. Please re-run puzzle solve.",
+                    message="The stored best move is illegal in this position. Re-run the solve.",
                 )
             next_state["referenced_move"] = solver_move
 
@@ -441,7 +519,7 @@ class ChessAssistantAgent:
                 return self._helpful_missing_context(
                     next_state,
                     reason="illegal_solver_line",
-                    message="The stored solver line contains illegal moves. Please re-run puzzle solve.",
+                    message="The stored line has illegal moves. Re-run the solve.",
                 )
             next_state["checkmate_verified"] = verification["checkmate_verified"]
             if not next_state.get("referenced_move"):
@@ -458,21 +536,34 @@ class ChessAssistantAgent:
             return self._helpful_missing_context(
                 state,
                 reason="missing_move_for_hint",
-                message="Please solve the puzzle first so I can generate a grounded hint.",
+                message="Solve the puzzle first. Then I can give a real hint.",
             )
 
-        hint_level = self._resolve_hint_level(state.get("user_message", ""))
+        hint_level = self._resolve_hint_level(
+            state.get("user_message", ""),
+            explicit_stage=state.get("coaching_stage"),
+        )
+        emotional_context = state.get("emotional_context")
+        slow_pace = isinstance(emotional_context, dict) and emotional_context.get(
+            "pace"
+        ) == "slow"
         hint_text = self._hint_writer.invoke(
             {
-                "hint_level": hint_level,
+                "coaching_stage": hint_level,
                 "move": move,
+                "line": state.get("solver_line", []),
+                "checkmate_verified": state.get("checkmate_verified", False),
+                "user_message": state.get("user_message", ""),
+                "slow_pace": slow_pace,
+                "conversation_mode": state.get("conversation_mode", "coach"),
             }
         )
+        confidence = 0.93 if hint_level >= 5 else 0.86
 
         return {
             **state,
             "response_text": hint_text,
-            "confidence": 0.86,
+            "confidence": confidence,
             "referenced_move": move,
         }
 
@@ -485,7 +576,7 @@ class ChessAssistantAgent:
             return self._helpful_missing_context(
                 state,
                 reason="missing_move_for_explanation",
-                message="Please solve the puzzle first so I can explain the verified move.",
+                message="Solve the puzzle first. Then I can explain the verified move.",
             )
 
         explanation = self._explain_writer.invoke(
@@ -493,6 +584,7 @@ class ChessAssistantAgent:
                 "move": move,
                 "line": state.get("solver_line", []),
                 "checkmate_verified": state.get("checkmate_verified", False),
+                "conversation_mode": state.get("conversation_mode", "coach"),
             }
         )
 
@@ -512,7 +604,7 @@ class ChessAssistantAgent:
             return self._helpful_missing_context(
                 state,
                 reason="missing_fen_for_theme",
-                message="Please solve or upload a puzzle first so I can identify tactical themes.",
+                message="Load a puzzle first. I need a position to tag the theme.",
             )
 
         themes = self._run_tool(
@@ -523,12 +615,10 @@ class ChessAssistantAgent:
         )
 
         if themes:
-            text = f"Likely tactical themes: {', '.join(themes)}."
+            text = f"Likely themes: {', '.join(themes)}."
             confidence = 0.74
         else:
-            text = (
-                "I'm not fully sure of the tactical theme from the verified data alone."
-            )
+            text = "Theme is unclear from this line alone."
             confidence = 0.45
 
         return {
@@ -583,7 +673,7 @@ class ChessAssistantAgent:
                 }
             return {
                 **state,
-                "response_text": "I do not see stored puzzle history for this local account yet. Solve a few puzzles first and try again.",
+                "response_text": "No saved puzzle history yet for this account. Solve a few and check again.",
                 "confidence": 0.9,
             }
         if asks_profile:
@@ -602,7 +692,7 @@ class ChessAssistantAgent:
                 return {
                     **state,
                     "response_text": (
-                        f"{referenced_token} is illegal in the current position, so that line cannot be analyzed."
+                        f"{referenced_token} is illegal here. That line does not work."
                     ),
                     "referenced_move": referenced_token,
                     "confidence": 0.98,
@@ -611,7 +701,8 @@ class ChessAssistantAgent:
             return {
                 **state,
                 "response_text": (
-                    f"{referenced_token} is legal in this position. If you want, ask for a hint or full explanation."
+                    f"{referenced_token} is legal here. Want a hint or the full line? "
+                    "What is the first forcing move you see after it?"
                 ),
                 "referenced_move": referenced_token,
                 "confidence": 0.82,
@@ -621,6 +712,7 @@ class ChessAssistantAgent:
             {
                 "message": message,
                 "has_position": bool(state.get("fen")),
+                "conversation_mode": state.get("conversation_mode", "coach"),
             }
         )
         return {
@@ -660,12 +752,12 @@ class ChessAssistantAgent:
         latest_rating = latest.get("difficultyRating") or latest.get("puzzleElo")
 
         parts = [
-            f"I found {total} stored puzzles for your local account.",
-            f"Most recent: {latest_name} (rating {latest_rating}).",
-            f"Solved mates recorded: {solved}.",
+            f"You have {total} stored puzzles.",
+            f"Latest: {latest_name} (rating {latest_rating}).",
+            f"Solved mates logged: {solved}.",
         ]
         if avg_rating is not None:
-            parts.append(f"Average puzzle rating: {avg_rating}.")
+            parts.append(f"Average rating: {avg_rating}.")
         if first_move_accuracy is not None:
             parts.append(f"First-move accuracy: {first_move_accuracy}%.")
         return " ".join(parts)
@@ -673,7 +765,7 @@ class ChessAssistantAgent:
     def _build_profile_summary(self, state: ChessAssistantState) -> str:
         profile = state.get("user_profile_context")
         if not isinstance(profile, dict):
-            return "I do not see profile details for this user in the current context."
+            return "I do not have profile details in this context."
 
         local_profile = profile.get("local_profile")
         auth_profile = profile.get("auth_profile")
@@ -688,7 +780,7 @@ class ChessAssistantAgent:
             if isinstance(email, str) and email.strip():
                 summary_parts.append(f"Email: {email.strip()}.")
             if isinstance(created_at, str) and created_at.strip():
-                summary_parts.append(f"Account created at: {created_at.strip()}.")
+                summary_parts.append(f"Account created: {created_at.strip()}.")
 
         if isinstance(auth_profile, dict):
             display_name = auth_profile.get("name") or auth_profile.get("nickname")
@@ -706,11 +798,11 @@ class ChessAssistantAgent:
     def validate_response(self, state: ChessAssistantState) -> ChessAssistantState:
         response_text = state.get("response_text", "").strip()
         if not response_text:
-            response_text = "I can help with puzzle explanations and hints once a solved puzzle is available."
+            response_text = "Share a solved puzzle and I can break it down."
 
         for pattern in SECRET_PATTERNS:
             if pattern.search(response_text):
-                response_text = "I can help with chess puzzle analysis, but I can't provide secrets or internal data."
+                response_text = "I can help with chess, but I cannot share secrets or internal data."
                 state["guardrail_triggered"] = True
                 state["guardrail_reason"] = "secret_redaction"
                 break
@@ -743,12 +835,41 @@ class ChessAssistantAgent:
                 "hint",
             }
         ):
-            response_text = "I can confirm the best move from the solver, but I cannot verify checkmate from the available line yet."
+            response_text = "I can confirm the best move, but mate is not verified from this line yet."
 
         confidence = state.get("confidence", 0.0)
         if not isinstance(confidence, (float, int)):
             confidence = 0.0
         confidence = max(0.0, min(1.0, float(confidence)))
+
+        emotional_context = state.get("emotional_context")
+        coaching_memory = state.get("coaching_memory")
+        conversation_mode = normalize_conversation_mode(
+            cast(str | None, state.get("conversation_mode"))
+        )
+        if (
+            not state.get("guardrail_triggered")
+            and isinstance(emotional_context, dict)
+            and state.get("requested_mode") in {"hint", "explain", "theme", "followup"}
+            and conversation_mode not in {"grandmaster", "minimal"}
+        ):
+            cue = emotional_context.get("cue")
+            memory_reference = build_memory_reference(
+                coaching_memory if isinstance(coaching_memory, dict) else None
+            )
+            fragments: list[str] = []
+            if isinstance(cue, str) and cue.strip():
+                fragments.append(cue.strip())
+            fragments.append(response_text)
+            if isinstance(memory_reference, str) and memory_reference.strip():
+                fragments.append(memory_reference.strip())
+            response_text = " ".join(fragment for fragment in fragments if fragment)
+
+        response_text = apply_personality(
+            response_text,
+            max_sentences=4,
+            conversation_mode=conversation_mode,
+        )
 
         return {
             **state,
@@ -756,6 +877,7 @@ class ChessAssistantAgent:
             "theme_tags": themes,
             "referenced_move": referenced_move,
             "confidence": confidence,
+            "conversation_mode": conversation_mode,
         }
 
     def _route_after_guardrail(self, state: ChessAssistantState) -> str:
@@ -769,51 +891,176 @@ class ChessAssistantAgent:
             return mode
         return "followup"
 
-    def _resolve_hint_level(self, message: str) -> int:
+    def _resolve_hint_level(
+        self, message: str, explicit_stage: int | None = None
+    ) -> int:
+        if isinstance(explicit_stage, int):
+            return max(1, min(5, explicit_stage))
         lowered = message.lower()
+        if self._wants_full_line(lowered):
+            return 5
+        if "hint 4" in lowered or "fourth hint" in lowered:
+            return 4
         if "hint 3" in lowered or "third hint" in lowered:
             return 3
         if "hint 2" in lowered or "second hint" in lowered:
             return 2
         return 1
 
-    def _build_hint_text(self, payload: dict[str, Any]) -> str:
-        level = int(payload.get("hint_level", 1))
-        move = str(payload.get("move", "the best move"))
+    def _wants_full_line(self, lowered_message: str) -> bool:
+        return any(phrase in lowered_message for phrase in FULL_LINE_REQUEST_PHRASES)
 
-        if level == 1:
-            return "Hint 1: Focus on forcing checks and reducing the opponent king's safe squares."
-        if level == 2:
-            return f"Hint 2: Focus on the attacking piece involved in {move} and the king-side escape squares."
-        return f"Hint 3: The winning continuation starts with {move}, but calculate it before playing."
+    def _build_guiding_question(
+        self,
+        stage: int,
+        conversation_mode: AssistantConversationMode,
+    ) -> str:
+        if stage <= 1:
+            if conversation_mode == "minimal":
+                return "Candidate move?"
+            if conversation_mode == "rival":
+                return "What was your first candidate?"
+            return "What candidate move were you considering?"
+        if stage == 2:
+            if conversation_mode == "minimal":
+                return "First forcing move?"
+            if conversation_mode == "rival":
+                return "Find the forcing move now."
+            return "What is the first forcing move you see?"
+        if stage == 3:
+            if conversation_mode == "minimal":
+                return "Which piece is overloaded?"
+            return "Which piece feels overloaded here?"
+        if conversation_mode == "rival":
+            return "Need the line, or can you calculate it?"
+        if conversation_mode == "grandmaster":
+            return "Hint or full line?"
+        return "Want a hint or the full line?"
+
+    def _build_hint_text(self, payload: dict[str, Any]) -> str:
+        stage = int(payload.get("coaching_stage", 1))
+        move = str(payload.get("move", "the best move"))
+        line = [
+            token.strip()
+            for token in payload.get("line", [])
+            if isinstance(token, str) and token.strip()
+        ]
+        checkmate_verified = bool(payload.get("checkmate_verified", False))
+        slow_pace = bool(payload.get("slow_pace", False))
+        conversation_mode = normalize_conversation_mode(
+            cast(str | None, payload.get("conversation_mode"))
+        )
+        acknowledgment = "Interesting position."
+        if conversation_mode == "rival":
+            acknowledgment = "Sharp position."
+        elif conversation_mode == "grandmaster":
+            acknowledgment = "Critical position."
+        elif conversation_mode == "club_friend":
+            acknowledgment = "Yeah, this one is sneaky."
+        elif conversation_mode == "minimal":
+            acknowledgment = ""
+
+        guiding_question = self._build_guiding_question(stage, conversation_mode)
+        directional_hint = "Now look at forcing checks that cut off escape squares."
+        tactical_hint = "Notice the overloaded defender and dark-square weakness around the king."
+        if conversation_mode == "rival":
+            directional_hint = "You saw the attack late. Force checks and cut escape squares."
+            tactical_hint = "Overloaded defender. Punish it immediately."
+        elif conversation_mode == "grandmaster":
+            directional_hint = "Only forcing line works. Start with checks."
+            tactical_hint = "Track overloaded defense and dark-square control."
+        elif conversation_mode == "club_friend":
+            directional_hint = "Start with forcing checks and see how the king runs out of squares."
+            tactical_hint = "Also watch the overloaded defender; that is the tactical trigger."
+        elif conversation_mode == "minimal":
+            directional_hint = "Checks first."
+            tactical_hint = "Overloaded defender."
+
+        if stage <= 1:
+            if slow_pace:
+                return (
+                    f"{acknowledgment} Slow down for one clean scan. {guiding_question}"
+                )
+            return f"{acknowledgment} {guiding_question}"
+        if stage == 2:
+            return f"{acknowledgment} {guiding_question} {directional_hint}"
+        if stage in {3, 4}:
+            return (
+                f"{acknowledgment} {guiding_question} {directional_hint} {tactical_hint}"
+            )
+
+        if line:
+            mate_suffix = " Mate is verified." if checkmate_verified else ""
+            if conversation_mode == "minimal":
+                return f"{move}. {' '.join(line)}.{mate_suffix}".strip()
+            return (
+                f"{acknowledgment} Now calculate {move}. "
+                f"Full line: {' '.join(line)}.{mate_suffix}"
+            )
+
+        return f"{acknowledgment} The key move is {move}. Want the full line next?"
 
     def _build_explanation_text(self, payload: dict[str, Any]) -> str:
         move = str(payload.get("move", ""))
         line = payload.get("line") or []
         checkmate_verified = bool(payload.get("checkmate_verified", False))
+        conversation_mode = normalize_conversation_mode(
+            cast(str | None, payload.get("conversation_mode"))
+        )
+        prefix = ""
+        if conversation_mode == "coach":
+            prefix = "You're close. "
+        elif conversation_mode == "rival":
+            prefix = "You saw the attack late. "
+        elif conversation_mode == "club_friend":
+            prefix = "Yeah this one is sneaky. "
 
         if checkmate_verified and line:
             return (
-                f"Best move: {move}. Verified line: {' '.join(line)}. "
-                "This works because the final position is checkmate with no legal king escape."
+                f"{prefix}Best move: {move}. Line: {' '.join(line)}. "
+                "Checkmate: no legal escape."
             )
 
         if line:
-            return f"Best move: {move}. Candidate line: {' '.join(line)}. I can explain the idea, but mate is not fully verified yet."
+            return (
+                f"{prefix}Best move: {move}. Line: {' '.join(line)}. "
+                "Idea is clear, mate still unverified."
+            )
 
-        return f"Best move: {move}. I can explain further once a verified continuation line is available."
+        return f"{prefix}Best move: {move}. Send a full line and I will break it down."
 
     def _build_followup_text(self, payload: dict[str, Any]) -> str:
         message = str(payload.get("message", "")).lower()
+        conversation_mode = normalize_conversation_mode(
+            cast(str | None, payload.get("conversation_mode"))
+        )
         for keyword, help_text in APP_FEATURE_HELP.items():
             if keyword in message:
+                if conversation_mode == "minimal":
+                    return help_text
+                if conversation_mode == "rival":
+                    return f"Quick read: {help_text}"
+                if conversation_mode == "club_friend":
+                    return f"Yep, {help_text}"
                 return help_text
 
         has_position = bool(payload.get("has_position", False))
         if has_position:
-            return "I can help with this puzzle. Ask for a hint, theme, or why the solver move works."
+            if conversation_mode == "minimal":
+                return "Position loaded. Candidate move?"
+            if conversation_mode == "grandmaster":
+                return "Position loaded. Give your candidate move."
+            return (
+                "Position loaded. Want a hint or the full line? "
+                "What candidate move were you considering?"
+            )
 
-        return "I can help with app navigation and puzzle learning. Solve or upload a puzzle first for position-specific guidance."
+        if conversation_mode == "minimal":
+            return "Load puzzle. Then send candidate move."
+        return (
+            "I can help with app flow and training. "
+            "For chess coaching, load a puzzle and tell me the first forcing move you see."
+        )
 
     def _extract_requested_tool(self, message: str) -> str | None:
         lowered = message.lower()

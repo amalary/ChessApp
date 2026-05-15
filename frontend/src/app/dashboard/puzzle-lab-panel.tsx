@@ -34,6 +34,8 @@ import {
   type PuzzleSubmissionRecord,
 } from '@/lib/puzzle-submissions';
 import { readActiveLocalAuthUser } from '@/lib/dashboard-theme-settings';
+import type { AssistantConversationMode } from '@/lib/assistant-conversation-mode';
+import { formatConversationalText } from '@/lib/assistant-rhythm';
 import {
   extractSolutionLines,
   extractSolveMeta,
@@ -45,6 +47,7 @@ type PuzzleLabPanelProps = {
   panelStyle?: React.CSSProperties;
   buttonStyle?: React.CSSProperties;
   isDark?: boolean;
+  assistantConversationMode?: AssistantConversationMode;
 };
 
 type SideToMove = 'white' | 'black';
@@ -980,7 +983,12 @@ function DnaRadar({ dna }: { dna: PuzzleDna }) {
   );
 }
 
-export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: PuzzleLabPanelProps) {
+export function PuzzleLabPanel({
+  panelStyle,
+  buttonStyle,
+  isDark = false,
+  assistantConversationMode = 'coach',
+}: PuzzleLabPanelProps) {
   const backendUrl = useMemo(() => process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://127.0.0.1:8010', []);
 
   const [file, setFile] = useState<File | null>(null);
@@ -1016,6 +1024,7 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
   const [sandboxMessage, setSandboxMessage] = useState('Load a puzzle to begin sandbox analysis.');
   const [sandboxHintLoading, setSandboxHintLoading] = useState(false);
   const [sandboxHint, setSandboxHint] = useState<string | null>(null);
+  const [sandboxHintStage, setSandboxHintStage] = useState(1);
 
   const [generatorInputs, setGeneratorInputs] = useState<GeneratorInputs>({
     fen: '',
@@ -1340,6 +1349,7 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
             user_message:
               'Explain this puzzle in a conversational way: why the sequence works, the threats, likely mistakes, and alternate losing lines.',
             requested_mode: 'explain',
+            conversation_mode: assistantConversationMode,
           } as const;
 
           const assistantResponse = await fetch(`${backendUrl}/assistant`, {
@@ -1370,6 +1380,10 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
       } catch {
         // Keep deterministic fallback explanation without blocking analysis.
       }
+      explanationText = formatConversationalText(explanationText, {
+        intent: 'explain',
+        maxBeats: 6,
+      });
 
       const mergedMotifs = Array.from(new Set([...motifs, ...assistantThemeTags.map((tag) => toTitleCase(tag))])).slice(0, 5);
       const dna = buildPuzzleDna({
@@ -1655,7 +1669,12 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
       const localAuthUserId = readActiveLocalAuthUser()?.id ?? null;
 
       if (!token) {
-        setSandboxHint('No Auth0 token found, so fallback hint: look for forcing checks and captures from the highest-value attacker.');
+        setSandboxHint(
+          formatConversationalText(
+            'No Auth0 token found. Start with forcing checks, then captures from your strongest attacker.',
+            { intent: 'hint', maxBeats: 3 },
+          ),
+        );
         return;
       }
 
@@ -1664,8 +1683,10 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
         fen: currentFen,
         solver_move_san: analysis?.solutionSan[0] ?? null,
         solver_line: analysis ? lineToTokens(analysis.solutionSan) : null,
+        coaching_stage: sandboxHintStage,
         user_message: 'Give one concise tactical hint without revealing the full line.',
         requested_mode: 'hint',
+        conversation_mode: assistantConversationMode,
       } as const;
 
       const response = await fetch(`${backendUrl}/assistant`, {
@@ -1684,12 +1705,28 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
       }
 
       if (typeof data.response_text === 'string' && data.response_text.trim()) {
-        setSandboxHint(data.response_text.trim());
+        setSandboxHint(
+          formatConversationalText(data.response_text.trim(), {
+            intent: 'hint',
+            maxBeats: 4,
+          }),
+        );
+        setSandboxHintStage((previous) => Math.min(previous + 1, 5));
       } else {
-        setSandboxHint('AI hint unavailable. Search forcing checks that reduce defensive choices.');
+        setSandboxHint(
+          formatConversationalText(
+            'AI hint unavailable. Search forcing checks that cut defensive choices.',
+            { intent: 'hint', maxBeats: 3 },
+          ),
+        );
       }
     } catch {
-      setSandboxHint('AI hint unavailable. Candidate suggestion: prioritize forcing checks over material grabs.');
+      setSandboxHint(
+        formatConversationalText(
+          'AI hint unavailable. Prioritize forcing checks over material grabs.',
+          { intent: 'hint', maxBeats: 3 },
+        ),
+      );
     } finally {
       setSandboxHintLoading(false);
     }
@@ -1848,6 +1885,10 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
   const primaryTextStyle: React.CSSProperties = {
     color: isDark ? 'rgb(226, 232, 240)' : 'rgb(51, 65, 85)',
   };
+
+  useEffect(() => {
+    setSandboxHintStage(1);
+  }, [analysis?.id]);
   const secondaryTextStyle: React.CSSProperties = {
     color: isDark ? 'rgb(203, 213, 225)' : 'rgb(71, 85, 105)',
   };
@@ -2105,7 +2146,7 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
                   <p className="text-sm font-semibold text-slate-700 dark:text-slate-100" style={primaryTextStyle}>AI Explanation</p>
                   <span className="text-xs text-slate-500 dark:text-slate-300" style={tertiaryTextStyle}>Confidence {(analysis.explanationConfidence * 100).toFixed(0)}%</span>
                 </div>
-                <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300" style={secondaryTextStyle}>{analysis.explanation}</p>
+                <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-600 dark:text-slate-300" style={secondaryTextStyle}>{analysis.explanation}</p>
               </div>
 
               <div className="mt-4 space-y-2">
@@ -2434,7 +2475,7 @@ export function PuzzleLabPanel({ panelStyle, buttonStyle, isDark = false }: Puzz
 
           <p className="mt-3 text-sm text-slate-600 dark:text-slate-300" style={secondaryTextStyle}>{sandboxMessage}</p>
           {sandboxHint && (
-            <p className="mt-2 rounded-xl border border-amber-300/45 bg-amber-100/70 dark:bg-amber-900/20 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+            <p className="mt-2 whitespace-pre-line rounded-xl border border-amber-300/45 bg-amber-100/70 dark:bg-amber-900/20 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
               {sandboxHint}
             </p>
           )}

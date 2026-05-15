@@ -26,8 +26,12 @@ class AssistantRequest(BaseModel):
     fen: str | None = Field(default=None)
     solver_move_san: str | None = Field(default=None)
     solver_line: list[str] | None = Field(default=None)
+    coaching_stage: int | None = Field(default=None, ge=1, le=5)
     user_message: str = Field(min_length=1, max_length=2000)
     requested_mode: Literal["hint", "explain", "theme", "followup"]
+    conversation_mode: Literal[
+        "coach", "rival", "grandmaster", "club_friend", "minimal"
+    ] | None = Field(default=None)
 
 
 class AssistantResponse(BaseModel):
@@ -79,8 +83,10 @@ async def assistant(
         fen=payload.fen,
         solver_move_san=payload.solver_move_san,
         solver_line=payload.solver_line,
+        coaching_stage=payload.coaching_stage,
         user_message=payload.user_message,
         requested_mode=payload.requested_mode,
+        conversation_mode=payload.conversation_mode,
         user_puzzle_history=history_context,
         user_profile_context=user_profile_context,
     )
