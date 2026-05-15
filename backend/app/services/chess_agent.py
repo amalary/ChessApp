@@ -544,9 +544,10 @@ class ChessAssistantAgent:
             explicit_stage=state.get("coaching_stage"),
         )
         emotional_context = state.get("emotional_context")
-        slow_pace = isinstance(emotional_context, dict) and emotional_context.get(
-            "pace"
-        ) == "slow"
+        slow_pace = (
+            isinstance(emotional_context, dict)
+            and emotional_context.get("pace") == "slow"
+        )
         hint_text = self._hint_writer.invoke(
             {
                 "coaching_stage": hint_level,
@@ -962,16 +963,24 @@ class ChessAssistantAgent:
 
         guiding_question = self._build_guiding_question(stage, conversation_mode)
         directional_hint = "Now look at forcing checks that cut off escape squares."
-        tactical_hint = "Notice the overloaded defender and dark-square weakness around the king."
+        tactical_hint = (
+            "Notice the overloaded defender and dark-square weakness around the king."
+        )
         if conversation_mode == "rival":
-            directional_hint = "You saw the attack late. Force checks and cut escape squares."
+            directional_hint = (
+                "You saw the attack late. Force checks and cut escape squares."
+            )
             tactical_hint = "Overloaded defender. Punish it immediately."
         elif conversation_mode == "grandmaster":
             directional_hint = "Only forcing line works. Start with checks."
             tactical_hint = "Track overloaded defense and dark-square control."
         elif conversation_mode == "club_friend":
-            directional_hint = "Start with forcing checks and see how the king runs out of squares."
-            tactical_hint = "Also watch the overloaded defender; that is the tactical trigger."
+            directional_hint = (
+                "Start with forcing checks and see how the king runs out of squares."
+            )
+            tactical_hint = (
+                "Also watch the overloaded defender; that is the tactical trigger."
+            )
         elif conversation_mode == "minimal":
             directional_hint = "Checks first."
             tactical_hint = "Overloaded defender."
@@ -985,9 +994,7 @@ class ChessAssistantAgent:
         if stage == 2:
             return f"{acknowledgment} {guiding_question} {directional_hint}"
         if stage in {3, 4}:
-            return (
-                f"{acknowledgment} {guiding_question} {directional_hint} {tactical_hint}"
-            )
+            return f"{acknowledgment} {guiding_question} {directional_hint} {tactical_hint}"
 
         if line:
             mate_suffix = " Mate is verified." if checkmate_verified else ""

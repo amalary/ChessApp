@@ -189,8 +189,10 @@ def build_conversational_memory(
             if first_move_correct is True:
                 knight_success_count += 1
 
-        if first_move_correct is False and first_token and RETREAT_MOVE_PATTERN.match(
-            first_token
+        if (
+            first_move_correct is False
+            and first_token
+            and RETREAT_MOVE_PATTERN.match(first_token)
         ):
             retreat_miss_count += 1
 
@@ -259,7 +261,10 @@ def build_conversational_memory(
 
     puzzle_strengths: list[str] = []
     puzzle_weaknesses: list[str] = []
-    if knight_total_count >= 2 and (knight_success_count / max(1, knight_total_count)) >= 0.6:
+    if (
+        knight_total_count >= 2
+        and (knight_success_count / max(1, knight_total_count)) >= 0.6
+    ):
         puzzle_strengths.append("knight forks")
     if hard_correct_count >= 2:
         puzzle_strengths.append("high-difficulty conversion")

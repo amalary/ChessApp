@@ -29,9 +29,9 @@ class AssistantRequest(BaseModel):
     coaching_stage: int | None = Field(default=None, ge=1, le=5)
     user_message: str = Field(min_length=1, max_length=2000)
     requested_mode: Literal["hint", "explain", "theme", "followup"]
-    conversation_mode: Literal[
-        "coach", "rival", "grandmaster", "club_friend", "minimal"
-    ] | None = Field(default=None)
+    conversation_mode: (
+        Literal["coach", "rival", "grandmaster", "club_friend", "minimal"] | None
+    ) = Field(default=None)
 
 
 class AssistantResponse(BaseModel):

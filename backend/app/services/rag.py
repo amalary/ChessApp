@@ -44,7 +44,9 @@ def _get_database_url() -> str:
 def _get_genai_client() -> genai.Client:
     api_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY/GOOGLE_API_KEY is missing. Set it in backend/.env")
+        raise RuntimeError(
+            "GEMINI_API_KEY/GOOGLE_API_KEY is missing. Set it in backend/.env"
+        )
     return genai.Client(api_key=api_key)
 
 
@@ -90,7 +92,9 @@ def retrieve_chunks(query: str, limit: int = 5) -> list[dict]:
                 cur.execute(sql, (query_embedding, normalized_limit))
                 rows = cur.fetchall()
     except psycopg.Error as exc:
-        raise RetrievalDatabaseError("Failed to retrieve documentation chunks.") from exc
+        raise RetrievalDatabaseError(
+            "Failed to retrieve documentation chunks."
+        ) from exc
 
     return [
         {

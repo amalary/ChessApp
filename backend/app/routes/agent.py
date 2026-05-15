@@ -19,7 +19,11 @@ from app.services.agent_chat import (
     QueryValidationError,
     generate_rag_answer,
 )
-from app.services.rag import EmbeddingServiceError, RetrievalDatabaseError, retrieve_chunks
+from app.services.rag import (
+    EmbeddingServiceError,
+    RetrievalDatabaseError,
+    retrieve_chunks,
+)
 from app.services.puzzle_submission_service import (
     build_submission_history_context_for_user,
 )
@@ -50,9 +54,9 @@ class RetrievalResponse(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     limit: int = Field(default=5, ge=1)
-    conversation_mode: Literal[
-        "coach", "rival", "grandmaster", "club_friend", "minimal"
-    ] | None = Field(default=None)
+    conversation_mode: (
+        Literal["coach", "rival", "grandmaster", "club_friend", "minimal"] | None
+    ) = Field(default=None)
 
 
 class ChatResponse(BaseModel):

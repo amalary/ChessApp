@@ -81,9 +81,7 @@ def _load_env_file(
         if skip_keys and key in skip_keys:
             continue
         should_override = bool(override_keys and key in override_keys)
-        if key and (
-            key not in os.environ or override_existing or should_override
-        ):
+        if key and (key not in os.environ or override_existing or should_override):
             os.environ[key] = value
 
 
@@ -291,7 +289,9 @@ def _create_submission_image_data_url(image_bytes: bytes) -> str | None:
                     if hasattr(Image, "Resampling")
                     else Image.LANCZOS
                 )
-                normalized = normalized.resize((target_width, target_height), resampling)
+                normalized = normalized.resize(
+                    (target_width, target_height), resampling
+                )
 
             with BytesIO() as output:
                 normalized.save(output, format="JPEG", quality=80, optimize=True)

@@ -70,6 +70,7 @@ FORBIDDEN_OUTPUT_PATTERNS = (
 
 logger = logging.getLogger(__name__)
 
+
 def _build_system_prompt(conversation_mode: str | None) -> str:
     mode = normalize_conversation_mode(conversation_mode)
     return f"""You are the Chess App Assistant.
@@ -128,7 +129,9 @@ class RAGAnswer(TypedDict):
 def _get_chat_client() -> genai.Client:
     api_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY/GOOGLE_API_KEY is missing. Set it in backend/.env")
+        raise RuntimeError(
+            "GEMINI_API_KEY/GOOGLE_API_KEY is missing. Set it in backend/.env"
+        )
     return genai.Client(api_key=api_key)
 
 

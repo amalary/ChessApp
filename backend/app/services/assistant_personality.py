@@ -72,7 +72,9 @@ MODE_SENTENCE_CAP: dict[AssistantConversationMode, int] = {
     "minimal": 1,
 }
 
-MODE_PHRASE_REPLACEMENTS: dict[AssistantConversationMode, tuple[tuple[str, str], ...]] = {
+MODE_PHRASE_REPLACEMENTS: dict[
+    AssistantConversationMode, tuple[tuple[str, str], ...]
+] = {
     "coach": (),
     "rival": (
         ("Interesting position.", "Sharp position."),
@@ -89,7 +91,10 @@ MODE_PHRASE_REPLACEMENTS: dict[AssistantConversationMode, tuple[tuple[str, str],
     "minimal": (
         ("Interesting position.", ""),
         ("Now look at forcing checks that cut off escape squares.", "Checks first."),
-        ("Notice the overloaded defender and dark-square weakness around the king.", "Overloaded defender."),
+        (
+            "Notice the overloaded defender and dark-square weakness around the king.",
+            "Overloaded defender.",
+        ),
         ("Want a hint or the full line?", "Hint or line?"),
         ("What candidate move were you considering?", "Candidate move?"),
         ("What is the first forcing move you see?", "First forcing move?"),
