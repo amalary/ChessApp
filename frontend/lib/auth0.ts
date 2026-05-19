@@ -1,9 +1,14 @@
 // frontend/lib/auth0.ts
 import { Auth0Client } from '@auth0/nextjs-auth0/server';
 
-// When this is "1", we don't hard-fail if env vars are missing.
-// Used only during Docker build.
-const ALLOW_MISSING_ENV = process.env.SKIP_AUTH0_VALIDATION === '1';
+// Next sets this phase while running `next build`.
+const IS_NEXT_PRODUCTION_BUILD =
+  process.env.NEXT_PHASE === 'phase-production-build';
+
+// When this is "1", or while Next is collecting build-time page data,
+// we don't hard-fail if Auth0 env vars are missing.
+const ALLOW_MISSING_ENV =
+  process.env.SKIP_AUTH0_VALIDATION === '1' || IS_NEXT_PRODUCTION_BUILD;
 
 const requireEnv = (key: string, fallback?: string): string => {
   const value = process.env[key];
