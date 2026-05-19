@@ -2607,7 +2607,7 @@ function SettingsPanel({
   );
 }
 
-export default function DashboardPage() {
+function DashboardPageContent() {
   const { theme, resolvedTheme, setTheme } = useTheme();
   const { user } = useUser();
   const router = useRouter();
@@ -4302,6 +4302,14 @@ export default function DashboardPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <DashboardPageContent />
+    </React.Suspense>
   );
 }
 

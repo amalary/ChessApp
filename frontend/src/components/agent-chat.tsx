@@ -128,6 +128,7 @@ export function AgentChat({
   const [inputPromptIndex, setInputPromptIndex] = useState(0);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isMomentumActionsSuppressed, setIsMomentumActionsSuppressed] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -161,10 +162,19 @@ export function AgentChat({
       }),
     [isSending, messages, submissions],
   );
+  const shouldShowMomentumActions = momentumActions.length > 0 && !isMomentumActionsSuppressed;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, isSending]);
+
+  useEffect(() => {
+    const latestMessage = messages[messages.length - 1];
+    const hasUserTurn = messages.some((message) => message.role === 'user');
+    if (latestMessage?.role === 'assistant' && hasUserTurn) {
+      setIsMomentumActionsSuppressed(false);
+    }
+  }, [messages]);
 
   useEffect(() => {
     return () => {
@@ -259,6 +269,7 @@ export function AgentChat({
     const now = new Date();
     setErrorMessage(null);
     setInput('');
+    setIsMomentumActionsSuppressed(true);
     setMessages((previous) => [
       ...previous,
       {
@@ -382,6 +393,31 @@ export function AgentChat({
               </div>
             </article>
           )}
+          {shouldShowMomentumActions && (
+            <article className="flex justify-start">
+              <div className="amy-chat-continue w-full rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2 backdrop-blur-lg dark:border-slate-400/70 dark:bg-slate-200/90">
+                <p className="amy-chat-continue__title mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600 dark:text-zinc-900">
+                  Continue With Amy
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {momentumActions.map((action) => (
+                    <button
+                      key={action.id}
+                      type="button"
+                      onClick={() => {
+                        setIsMomentumActionsSuppressed(true);
+                        void submitMessage(action.prompt);
+                      }}
+                      disabled={isSending}
+                      className="amy-chat-continue__action rounded-full border border-cyan-300/35 bg-gradient-to-r from-white/90 to-cyan-50/80 px-3 py-1.5 text-xs font-semibold text-zinc-700 transition-all duration-200 hover:-translate-y-[1px] hover:border-cyan-300/55 hover:shadow-[0_8px_18px_rgba(2,6,23,0.1)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-500/70 dark:from-slate-100 dark:to-slate-200 dark:text-zinc-900 dark:hover:border-slate-600 dark:hover:shadow-[0_8px_18px_rgba(2,6,23,0.18)]"
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </article>
+          )}
           <div ref={endRef} />
         </div>
       </div>
@@ -401,29 +437,6 @@ export function AgentChat({
               {chip.label}
             </button>
           ))}
-        </div>
-      )}
-
-      {momentumActions.length > 0 && (
-        <div className="amy-chat-continue mt-3 rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-2 backdrop-blur-lg dark:border-slate-400/70 dark:bg-slate-200/90">
-          <p className="amy-chat-continue__title mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600 dark:text-zinc-900">
-            Continue With Amy
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {momentumActions.map((action) => (
-              <button
-                key={action.id}
-                type="button"
-                onClick={() => {
-                  void submitMessage(action.prompt);
-                }}
-                disabled={isSending}
-                className="amy-chat-continue__action rounded-full border border-cyan-300/35 bg-gradient-to-r from-white/90 to-cyan-50/80 px-3 py-1.5 text-xs font-semibold text-zinc-700 transition-all duration-200 hover:-translate-y-[1px] hover:border-cyan-300/55 hover:shadow-[0_8px_18px_rgba(2,6,23,0.1)] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-500/70 dark:from-slate-100 dark:to-slate-200 dark:text-zinc-900 dark:hover:border-slate-600 dark:hover:shadow-[0_8px_18px_rgba(2,6,23,0.18)]"
-              >
-                {action.label}
-              </button>
-            ))}
-          </div>
         </div>
       )}
 
@@ -449,7 +462,13 @@ export function AgentChat({
             <input
               ref={inputRef}
               value={input}
-              onChange={(event) => setInput(event.target.value)}
+              onChange={(event) => {
+                const nextInput = event.target.value;
+                if (nextInput.trim().length > 0) {
+                  setIsMomentumActionsSuppressed(true);
+                }
+                setInput(nextInput);
+              }}
               onFocus={() => setIsInputFocused(true)}
               onBlur={() => setIsInputFocused(false)}
               disabled={isSending}

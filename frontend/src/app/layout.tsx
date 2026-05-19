@@ -13,8 +13,14 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const session = await auth0.getSession();
-  const user = session?.user;
+  let user: Parameters<typeof Providers>[0]['user'];
+
+  try {
+    const session = await auth0.getSession();
+    user = session?.user;
+  } catch {
+    user = undefined;
+  }
 
   return (
     <html lang="en" suppressHydrationWarning>
