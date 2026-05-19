@@ -3,6 +3,7 @@ import re
 import shutil
 import logging
 import base64
+from uuid import uuid4
 from datetime import datetime
 from io import BytesIO
 from time import perf_counter
@@ -18,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.api.errors import install_api_error_handlers
 from app.db_auth import get_db
+from app.evals.trace_logger import log_solve_trace_safe, utc_timestamp
 from app.local_auth_user import get_optional_local_auth_user
 from app.middleware.rate_limit_middleware import rate_limit_middleware
 from app.models_auth import LocalAuthUser
@@ -454,6 +456,19 @@ async def solve(
     local_auth_user: LocalAuthUser | None = Depends(get_optional_local_auth_user),
 ):
     started_at = perf_counter()
+    trace_data: dict[str, object | None] = {
+        "trace_id": str(uuid4()),
+        "timestamp": utc_timestamp(),
+        "image_filename": upload.filename,
+        "gemini_raw_output": None,
+        "parsed_fen": None,
+        "fen_valid": None,
+        "stockfish_best_move": None,
+        "stockfish_mate_depth": None,
+        "final_response": None,
+        "latency_ms": None,
+        "error_message": None,
+    }
     try:
         image_bytes = upload.data
 
@@ -463,12 +478,16 @@ async def solve(
             upload.filename,
             expected_side_to_move=expected_side_to_move,
             attempts=max(1, _env_int("GEMINI_TRANSCRIBE_ATTEMPTS", 5)),
+            include_raw_output=True,
         )
+        trace_data["gemini_raw_output"] = gemini_result.get("raw_output")
         fen = gemini_result["fen"]
         confidence = gemini_result["confidence"]
+        trace_data["parsed_fen"] = fen
 
         # 2) Validate FEN
         _validate_fen_or_raise(fen)
+        trace_data["fen_valid"] = True
 
         # 3) Run Stockfish
         stockfish_path = _resolve_stockfish_path_or_raise()
@@ -479,6 +498,12 @@ async def solve(
             think_time_s=2.0,
             max_mate=3,
         )
+        trace_data["stockfish_best_move"] = (
+            result.moves_uci[0]
+            if result and isinstance(result.moves_uci, list) and result.moves_uci
+            else None
+        )
+        trace_data["stockfish_mate_depth"] = result.mate_in if result else None
         solve_time_ms = max(0, int(round((perf_counter() - started_at) * 1000)))
         gemini_result["side_to_move"] = "white" if chess.Board(fen).turn else "black"
         await clear_failed_solve_attempts(request)
@@ -503,7 +528,7 @@ async def solve(
             )
 
         # 4) Response
-        return {
+        response_payload = {
             "fen": fen,
             "vision_confidence": confidence,
             "vision_side_to_move": gemini_result.get("side_to_move"),
@@ -513,11 +538,22 @@ async def solve(
             "moves_san": result.moves_san if result else [],
             "moves_uci": result.moves_uci if result else [],
         }
+        trace_data["final_response"] = response_payload
+        return response_payload
 
     except HTTPException as exc:
+        trace_data["fen_valid"] = False if trace_data["fen_valid"] is None else trace_data["fen_valid"]
+        trace_data["error_message"] = str(exc.detail)
         if exc.status_code in {400, 422}:
             await record_failed_solve_attempt(request)
         raise
     except Exception as exc:
+        trace_data["fen_valid"] = False if trace_data["fen_valid"] is None else trace_data["fen_valid"]
+        trace_data["error_message"] = str(exc)
         logger.exception("Unexpected /solve failure: %s", exc)
         raise HTTPException(status_code=500, detail="Internal server error.")
+    finally:
+        trace_data["latency_ms"] = max(
+            0, int(round((perf_counter() - started_at) * 1000))
+        )
+        log_solve_trace_safe(trace_data)

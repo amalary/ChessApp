@@ -7,6 +7,7 @@ import {
   appendMockAssistantTurn,
   applyStarterPromptToInput,
   buildInitialAgentMessages,
+  resolveReferencedPuzzle,
 } from './agent-chat-state';
 import type { PuzzleSubmissionRecord } from '@/lib/puzzle-submissions';
 
@@ -142,5 +143,60 @@ describe('agent chat state', () => {
       requested_mode: 'explain',
       conversation_mode: 'coach',
     });
+  });
+
+  it('resolves the latest puzzle image when user asks about recent puzzle context', () => {
+    const referenced = resolveReferencedPuzzle({
+      submissions: [
+        buildSubmission({
+          id: 'older',
+          fileName: 'older-puzzle.png',
+          submittedAt: new Date('2026-05-01T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,older',
+        }),
+        buildSubmission({
+          id: 'latest',
+          fileName: 'latest-puzzle.png',
+          submittedAt: new Date('2026-05-10T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,latest',
+        }),
+      ],
+      userMessage: 'Explain my latest puzzle.',
+      assistantMessage: 'Let us review your recent puzzle.',
+    });
+
+    expect(referenced?.id).toBe('latest');
+    expect(referenced?.imageDataUrl).toBe('data:image/jpeg;base64,latest');
+  });
+
+  it('resolves puzzle by filename token match when referenced directly', () => {
+    const referenced = resolveReferencedPuzzle({
+      submissions: [
+        buildSubmission({
+          id: 'fork-study',
+          fileName: 'Sicilian Fork Puzzle.png',
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,fork',
+        }),
+        buildSubmission({
+          id: 'pin-study',
+          fileName: 'Quiet Pin Puzzle.png',
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,pin',
+        }),
+      ],
+      userMessage: 'Can you explain the sicilian puzzle line?',
+      assistantMessage: 'Sure, this puzzle hinges on a tactical fork.',
+    });
+
+    expect(referenced?.id).toBe('fork-study');
+  });
+
+  it('returns null when message is not puzzle-related', () => {
+    const referenced = resolveReferencedPuzzle({
+      submissions: [buildSubmission()],
+      userMessage: 'How do I change theme colors?',
+      assistantMessage: 'Open settings and choose accent colors.',
+    });
+
+    expect(referenced).toBeNull();
   });
 });

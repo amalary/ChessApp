@@ -18,3 +18,4 @@ cloud-sql-proxy*.exe
 
 # Runtime logs/process metadata
 .runlogs/
+backend/app/evals/reports/

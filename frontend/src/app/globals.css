@@ -1483,3 +1483,20 @@ body {
 .dark .dashboard-theme .puzzle-lab-contrast [class~='text-slate-500'] {
   color: rgb(203, 213, 225) !important;
 }
+
+/* Ensure contrast for Agent "Continue With Amy" block in dark mode. */
+.dark .amy-chat-continue,
+.dark .dashboard-theme .amy-chat-continue {
+  background-color: rgba(226, 232, 240, 0.92) !important;
+  border-color: rgba(100, 116, 139, 0.75) !important;
+}
+
+.dark .amy-chat-continue__title,
+.dark .dashboard-theme .amy-chat-continue__title {
+  color: rgb(15, 23, 42) !important;
+}
+
+.dark .amy-chat-continue__action,
+.dark .dashboard-theme .amy-chat-continue__action {
+  color: rgb(15, 23, 42) !important;
+}

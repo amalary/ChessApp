@@ -13,6 +13,14 @@ export type AgentChatMessage = {
   timestamp: string;
 };
 
+export type AgentReferencedPuzzle = {
+  id: string;
+  fileName: string;
+  submittedAt: string;
+  fen: string | null;
+  imageDataUrl: string;
+};
+
 export type PuzzleContextSnapshot = {
   puzzleId: string | null;
   fen: string | null;
@@ -79,6 +87,72 @@ const AGENT_FALLBACK_PROMPTS: AgentSuggestionChip[] = [
     prompt: 'Train this pattern with three short puzzles and no full line first.',
   },
 ];
+
+const PUZZLE_REFERENCE_PATTERN =
+  /\b(puzzle|position|board|fen|uploaded|upload|latest|recent|last)\b/i;
+const FILE_NAME_TOKEN_PATTERN = /[a-z0-9]{3,}/gi;
+
+function isImageDataUrl(value: string | null | undefined): value is string {
+  return typeof value === 'string' && value.startsWith('data:image/');
+}
+
+function toSubmissionTimestamp(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function scoreFileNameMatch(fileName: string, query: string): number {
+  const tokens = fileName.toLowerCase().match(FILE_NAME_TOKEN_PATTERN) ?? [];
+  if (tokens.length === 0) {
+    return 0;
+  }
+  let score = 0;
+  for (const token of tokens) {
+    if (query.includes(token)) {
+      score += token.length;
+    }
+  }
+  return score;
+}
+
+export function resolveReferencedPuzzle(input: {
+  submissions: PuzzleSubmissionRecord[];
+  userMessage: string;
+  assistantMessage?: string;
+}): AgentReferencedPuzzle | null {
+  const available = input.submissions
+    .filter((submission) => isImageDataUrl(submission.originalPuzzleImageDataUrl))
+    .sort((left, right) => toSubmissionTimestamp(right.submittedAt) - toSubmissionTimestamp(left.submittedAt));
+  if (available.length === 0) {
+    return null;
+  }
+
+  const userText = input.userMessage.trim().toLowerCase();
+  const assistantText = (input.assistantMessage ?? '').trim().toLowerCase();
+  const combinedText = `${userText} ${assistantText}`.trim();
+  if (!PUZZLE_REFERENCE_PATTERN.test(combinedText)) {
+    return null;
+  }
+
+  let bestMatch: PuzzleSubmissionRecord | null = null;
+  let bestScore = 0;
+  for (const submission of available) {
+    const score = scoreFileNameMatch(submission.fileName, combinedText);
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = submission;
+    }
+  }
+
+  const selected = bestMatch ?? available[0];
+  return {
+    id: selected.id,
+    fileName: selected.fileName || 'Uploaded puzzle',
+    submittedAt: selected.submittedAt,
+    fen: selected.fen ?? null,
+    imageDataUrl: selected.originalPuzzleImageDataUrl!,
+  };
+}
 
 function inferMotifTag(submission: PuzzleSubmissionRecord): string {
   const searchable = `${submission.fileName} ${submission.solutionLines.join(' ')}`.toLowerCase();
