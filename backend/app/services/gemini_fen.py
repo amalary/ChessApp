@@ -215,7 +215,7 @@ def _call_gemini_structured(
     image_bytes: bytes,
     mime: str,
     correction_message: str | None = None,
-) -> tuple[dict[str, Any], str]:
+) -> dict[str, Any]:
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     user_parts: list[dict[str, Any]] = [
         {
@@ -256,7 +256,10 @@ def _call_gemini_structured(
 
     text = (resp.text or "").strip()
     json_text = _extract_json_text(text)
-    return json.loads(json_text), text
+    payload = json.loads(json_text)
+    if isinstance(payload, dict):
+        payload["_raw_output"] = text
+    return payload
 
 
 def _pick_consensus_fen(
@@ -289,11 +292,18 @@ def _pick_consensus_fen(
             best_rows = fen_rows
 
     avg_conf = sum(item["confidence"] for item in best_rows) / len(best_rows)
+    selected_raw_output = None
+    for item in reversed(best_rows):
+        raw = item.get("raw_output")
+        if isinstance(raw, str) and raw.strip():
+            selected_raw_output = raw
+            break
     return {
         "fen": best_fen,
         "confidence": round(avg_conf, 4),
         "side_to_move": "white" if best_rows[0]["side"] == "w" else "black",
         "attempts_used": attempts_used if attempts_used is not None else len(rows),
+        "raw_output": selected_raw_output,
     }
 
 
@@ -302,7 +312,6 @@ def fen_from_image_bytes(
     filename: str | None = None,
     expected_side_to_move: str | None = None,
     attempts: int = 3,
-    include_raw_output: bool = False,
 ) -> Dict[str, Any]:
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -323,23 +332,12 @@ def fen_from_image_bytes(
     min_attempts = max(1, _env_int("GEMINI_MIN_ATTEMPTS", 3))
     max_attempts = max(1, _env_int("GEMINI_TRANSCRIBE_ATTEMPTS", attempts))
     consensus_exit_votes = max(2, _env_int("GEMINI_CONSENSUS_EXIT_VOTES", 3))
-    raw_attempts: list[dict[str, Any]] = []
 
     for idx in range(max_attempts):
         payload, mime = variants[idx % len(variants)]
         try:
-            data, raw_text = _call_gemini_structured(
-                client, payload, mime, correction_message
-            )
-            if include_raw_output:
-                raw_attempts.append(
-                    {
-                        "attempt": idx + 1,
-                        "mime": mime,
-                        "raw_text": raw_text,
-                        "parsed_json": data,
-                    }
-                )
+            data = _call_gemini_structured(client, payload, mime, correction_message)
+            raw_output = data.get("_raw_output") if isinstance(data, dict) else None
             board_map = _extract_board_map(data)
             side = _normalize_side(data.get("side_to_move"))
             if board_map is None or side is None:
@@ -374,6 +372,7 @@ def fen_from_image_bytes(
                     "side": side,
                     "is_valid": validate_fen(fen).passed,
                     "side_matches_expected": side_matches_expected,
+                    "raw_output": raw_output,
                 }
             )
             all_candidates.extend(valid_candidates[-1:])
@@ -397,28 +396,18 @@ def fen_from_image_bytes(
                 and fen_avg_conf >= early_exit_confidence
                 and side_matches_expected
             ):
-                result = {
+                return {
                     "fen": fen,
                     "confidence": round(fen_avg_conf, 4),
                     "side_to_move": "white" if side == "w" else "black",
                     "attempts_used": idx + 1,
+                    "raw_output": raw_output,
                 }
-                if include_raw_output:
-                    result["raw_output"] = raw_attempts
-                return result
             correction_message = (
                 "Double-check every occupied square and ensure board_map is exact."
             )
         except Exception as exc:
             last_error = str(exc)
-            if include_raw_output:
-                raw_attempts.append(
-                    {
-                        "attempt": idx + 1,
-                        "mime": mime,
-                        "error": last_error,
-                    }
-                )
             correction_message = (
                 f"Previous output could not be parsed ({last_error}). "
                 "Return strict JSON only."
@@ -428,19 +417,14 @@ def fen_from_image_bytes(
         raise ValueError(f"Gemini could not transcribe board: {last_error}")
 
     valid_only = [row for row in valid_candidates if bool(row.get("is_valid"))]
-    result: dict[str, Any]
     if valid_only:
-        result = _pick_consensus_fen(
+        return _pick_consensus_fen(
             valid_only,
             expected_side=expected,
             attempts_used=max_attempts,
         )
-    else:
-        result = _pick_consensus_fen(
-            all_candidates if all_candidates else valid_candidates,
-            expected_side=expected,
-            attempts_used=max_attempts,
-        )
-    if include_raw_output:
-        result["raw_output"] = raw_attempts
-    return result
+    return _pick_consensus_fen(
+        all_candidates if all_candidates else valid_candidates,
+        expected_side=expected,
+        attempts_used=max_attempts,
+    )

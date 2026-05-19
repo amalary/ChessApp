@@ -99,6 +99,21 @@ Expected response:
 - Local auth + solve flow: `http://localhost:3000/login-test`
 - Solve page: `http://localhost:3000/solve-test`
 
+## Quick Eval (CI-safe)
+
+Run from `ChessApp/backend`:
+
+```bash
+python -m app.evals.run_eval --quick
+```
+
+Behavior:
+- Exits with code `1` when FEN accuracy is below `70%`.
+- Exits with code `1` when best move accuracy is below `70%`.
+- Exits with code `1` when average OpenAI judge score is below `0.70` (when AI eval is enabled).
+- Prints `Missing GOOGLE_API_KEY or OPENAI_API_KEY. Skipping AI eval.` when either key is missing.
+- Exits with code `0` when eval data files are missing, so local development is not blocked.
+
 ## One-Command Startup (PowerShell)
 
 From repo root (`ChessApp/`), run:
