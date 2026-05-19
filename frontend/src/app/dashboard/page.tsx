@@ -72,6 +72,7 @@ const ANALYTICS_SECONDARY_SUBSECTIONS = [
   'Accuracy by Difficulty',
   'First-Move Accuracy',
 ] as const;
+const ANALYTICS_MAX_OPEN_SECONDARY_SECTIONS = 2;
 const ANALYTICS_RECENT_SOLVE_LIMIT = 60;
 const DIFFICULTY_ELO_BUCKET_SIZE = 200;
 const DAY_MS = 86400000;
@@ -108,6 +109,7 @@ const GRADIENT_DIRECTIONS = [
 ] as const;
 
 type ActivityRange = (typeof RANGE_TABS)[number];
+type AnalyticsSecondarySubsection = (typeof ANALYTICS_SECONDARY_SUBSECTIONS)[number];
 type PuzzleActivityData = {
   values: number[];
   axisLabels: string[];
@@ -2624,10 +2626,9 @@ function DashboardPageContent() {
   const [activeRange, setActiveRange] = useState<(typeof RANGE_TABS)[number]>('Today');
   const [selectedAnalyticsTheme, setSelectedAnalyticsTheme] = useState<AnalyticsTheme | null>(null);
   const [isAnalyticsSectionsOpen, setIsAnalyticsSectionsOpen] = useState(true);
-  const [isSolveTimeSectionOpen, setIsSolveTimeSectionOpen] = useState(true);
-  const [isRatingProgressionSectionOpen, setIsRatingProgressionSectionOpen] = useState(true);
-  const [isAccuracyByDifficultySectionOpen, setIsAccuracyByDifficultySectionOpen] = useState(true);
-  const [isFirstMoveAccuracySectionOpen, setIsFirstMoveAccuracySectionOpen] = useState(true);
+  const [openAnalyticsSecondarySubsections, setOpenAnalyticsSecondarySubsections] = useState<
+    AnalyticsSecondarySubsection[]
+  >(['Solve Time vs Difficulty', 'Puzzle Rating Progression']);
   const [isTransitioningToChessApp, setIsTransitioningToChessApp] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showSubmissionHistory, setShowSubmissionHistory] = useState(false);
@@ -2661,6 +2662,39 @@ function DashboardPageContent() {
   const isDark = theme === 'dark' || (theme === 'system' && resolvedTheme === 'dark');
   const backendUrl = useMemo(
     () => process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://127.0.0.1:8010',
+    [],
+  );
+  const isSolveTimeSectionOpen = openAnalyticsSecondarySubsections.includes(
+    'Solve Time vs Difficulty',
+  );
+  const isRatingProgressionSectionOpen = openAnalyticsSecondarySubsections.includes(
+    'Puzzle Rating Progression',
+  );
+  const isAccuracyByDifficultySectionOpen = openAnalyticsSecondarySubsections.includes(
+    'Accuracy by Difficulty',
+  );
+  const isFirstMoveAccuracySectionOpen = openAnalyticsSecondarySubsections.includes(
+    'First-Move Accuracy',
+  );
+
+  const openAnalyticsSecondarySubsection = useCallback((section: AnalyticsSecondarySubsection) => {
+    setOpenAnalyticsSecondarySubsections((current) => {
+      if (current.includes(section)) {
+        return current;
+      }
+      if (current.length < ANALYTICS_MAX_OPEN_SECONDARY_SECTIONS) {
+        return [...current, section];
+      }
+      return [...current.slice(0, -1), section];
+    });
+  }, []);
+
+  const collapseAnalyticsSecondarySubsection = useCallback(
+    (section: AnalyticsSecondarySubsection) => {
+      setOpenAnalyticsSecondarySubsections((current) =>
+        current.filter((currentSection) => currentSection !== section),
+      );
+    },
     [],
   );
 
@@ -3734,13 +3768,17 @@ function DashboardPageContent() {
                               data={solveTimeDifficultyData}
                               sectionStyle={dashboardContainerStyle}
                               accentChannels={accentChannels}
-                              onCollapse={() => setIsSolveTimeSectionOpen(false)}
+                              onCollapse={() =>
+                                collapseAnalyticsSecondarySubsection('Solve Time vs Difficulty')
+                              }
                             />
                           ) : (
                             <button
                               key={title}
                               type="button"
-                              onClick={() => setIsSolveTimeSectionOpen(true)}
+                              onClick={() =>
+                                openAnalyticsSecondarySubsection('Solve Time vs Difficulty')
+                              }
                               className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                               style={dashboardContainerStyle}
                               aria-expanded={false}
@@ -3762,17 +3800,21 @@ function DashboardPageContent() {
                           )
                         ) : title === 'Puzzle Rating Progression' ? (
                           isRatingProgressionSectionOpen ? (
-                            <PuzzleRatingProgressionChart
+                          <PuzzleRatingProgressionChart
                               key={title}
                               data={puzzleRatingProgressionData}
                               sectionStyle={dashboardContainerStyle}
-                              onCollapse={() => setIsRatingProgressionSectionOpen(false)}
+                              onCollapse={() =>
+                                collapseAnalyticsSecondarySubsection('Puzzle Rating Progression')
+                              }
                             />
                           ) : (
                             <button
                               key={title}
                               type="button"
-                              onClick={() => setIsRatingProgressionSectionOpen(true)}
+                              onClick={() =>
+                                openAnalyticsSecondarySubsection('Puzzle Rating Progression')
+                              }
                               className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                               style={dashboardContainerStyle}
                               aria-expanded={false}
@@ -3794,19 +3836,23 @@ function DashboardPageContent() {
                           )
                         ) : title === 'Accuracy by Difficulty' ? (
                           isAccuracyByDifficultySectionOpen ? (
-                            <AccuracyByDifficultyCard
+                          <AccuracyByDifficultyCard
                               key={title}
                               analytics={difficultyBucketAnalytics}
                               loading={difficultyBucketAnalyticsLoading}
                               error={difficultyBucketAnalyticsError}
                               sectionStyle={dashboardContainerStyle}
-                              onCollapse={() => setIsAccuracyByDifficultySectionOpen(false)}
+                              onCollapse={() =>
+                                collapseAnalyticsSecondarySubsection('Accuracy by Difficulty')
+                              }
                             />
                           ) : (
                             <button
                               key={title}
                               type="button"
-                              onClick={() => setIsAccuracyByDifficultySectionOpen(true)}
+                              onClick={() =>
+                                openAnalyticsSecondarySubsection('Accuracy by Difficulty')
+                              }
                               className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                               style={dashboardContainerStyle}
                               aria-expanded={false}
@@ -3828,17 +3874,21 @@ function DashboardPageContent() {
                           )
                         ) : title === 'First-Move Accuracy' ? (
                           isFirstMoveAccuracySectionOpen ? (
-                            <FirstMoveAccuracyCard
+                          <FirstMoveAccuracyCard
                               key={title}
                               summary={firstMoveAccuracySummary}
                               sectionStyle={dashboardContainerStyle}
-                              onCollapse={() => setIsFirstMoveAccuracySectionOpen(false)}
+                              onCollapse={() =>
+                                collapseAnalyticsSecondarySubsection('First-Move Accuracy')
+                              }
                             />
                           ) : (
                             <button
                               key={title}
                               type="button"
-                              onClick={() => setIsFirstMoveAccuracySectionOpen(true)}
+                              onClick={() =>
+                                openAnalyticsSecondarySubsection('First-Move Accuracy')
+                              }
                               className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                               style={dashboardContainerStyle}
                               aria-expanded={false}
@@ -3903,13 +3953,17 @@ function DashboardPageContent() {
                             data={solveTimeDifficultyData}
                             sectionStyle={dashboardContainerStyle}
                             accentChannels={accentChannels}
-                            onCollapse={() => setIsSolveTimeSectionOpen(false)}
+                            onCollapse={() =>
+                              collapseAnalyticsSecondarySubsection('Solve Time vs Difficulty')
+                            }
                           />
                         ) : (
                           <button
                             key={title}
                             type="button"
-                            onClick={() => setIsSolveTimeSectionOpen(true)}
+                            onClick={() =>
+                              openAnalyticsSecondarySubsection('Solve Time vs Difficulty')
+                            }
                             className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                             style={dashboardContainerStyle}
                             aria-expanded={false}
@@ -3935,13 +3989,17 @@ function DashboardPageContent() {
                             key={title}
                             data={puzzleRatingProgressionData}
                             sectionStyle={dashboardContainerStyle}
-                            onCollapse={() => setIsRatingProgressionSectionOpen(false)}
+                            onCollapse={() =>
+                              collapseAnalyticsSecondarySubsection('Puzzle Rating Progression')
+                            }
                           />
                         ) : (
                           <button
                             key={title}
                             type="button"
-                            onClick={() => setIsRatingProgressionSectionOpen(true)}
+                            onClick={() =>
+                              openAnalyticsSecondarySubsection('Puzzle Rating Progression')
+                            }
                             className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                             style={dashboardContainerStyle}
                             aria-expanded={false}
@@ -3969,13 +4027,17 @@ function DashboardPageContent() {
                             loading={difficultyBucketAnalyticsLoading}
                             error={difficultyBucketAnalyticsError}
                             sectionStyle={dashboardContainerStyle}
-                            onCollapse={() => setIsAccuracyByDifficultySectionOpen(false)}
+                            onCollapse={() =>
+                              collapseAnalyticsSecondarySubsection('Accuracy by Difficulty')
+                            }
                           />
                         ) : (
                           <button
                             key={title}
                             type="button"
-                            onClick={() => setIsAccuracyByDifficultySectionOpen(true)}
+                            onClick={() =>
+                              openAnalyticsSecondarySubsection('Accuracy by Difficulty')
+                            }
                             className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                             style={dashboardContainerStyle}
                             aria-expanded={false}
@@ -4001,13 +4063,17 @@ function DashboardPageContent() {
                             key={title}
                             summary={firstMoveAccuracySummary}
                             sectionStyle={dashboardContainerStyle}
-                            onCollapse={() => setIsFirstMoveAccuracySectionOpen(false)}
+                            onCollapse={() =>
+                              collapseAnalyticsSecondarySubsection('First-Move Accuracy')
+                            }
                           />
                         ) : (
                           <button
                             key={title}
                             type="button"
-                            onClick={() => setIsFirstMoveAccuracySectionOpen(true)}
+                            onClick={() =>
+                              openAnalyticsSecondarySubsection('First-Move Accuracy')
+                            }
                             className="w-full neumo-surface-soft rounded-3xl px-5 py-4 min-h-[108px] flex flex-col justify-between text-left transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                             style={dashboardContainerStyle}
                             aria-expanded={false}
