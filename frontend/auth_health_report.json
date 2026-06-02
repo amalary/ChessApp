@@ -1,0 +1,77 @@
+{
+  "checkedAt": "2026-05-29T21:44:55.180Z",
+  "baseUrl": "http://localhost:3000",
+  "signupEmail": "chessapp.auth0.health.1780091095180@example.com",
+  "steps": [
+    {
+      "at": "2026-05-29T21:44:59.091Z",
+      "action": "goto_login_signup",
+      "url": "https://dev-ar8epqvzotynb5dx.us.auth0.com/u/signup?state=hKFo2SBncjNYdGVPdFZCbEstSUVSVmNsTjdQeElQbmJJQmtGb6Fur3VuaXZlcnNhbC1sb2dpbqN0aWTZIEFXa1U1WV9qRDlKVkFoaHc3dGdsU0dHNnRSMFh1SVVko2NpZNkgaFBreWR4eTljUHJFMVU3Vkd6ejh0ZG15eXBzb0NPenk"
+    },
+    {
+      "at": "2026-05-29T21:44:59.151Z",
+      "action": "filled_email",
+      "selector": "input[name=\"email\"]"
+    },
+    {
+      "at": "2026-05-29T21:44:59.190Z",
+      "action": "filled_password",
+      "selector": "input[type=\"password\"]"
+    },
+    {
+      "at": "2026-05-29T21:45:00.368Z",
+      "action": "clicked",
+      "selector": "button[type=\"submit\"]"
+    }
+  ],
+  "loginPhase": {
+    "returnedToApp": true,
+    "urlAfterLogin": "http://localhost:3000/"
+  },
+  "afterLoginAuthMe": {
+    "at": "2026-05-29T21:45:02.942Z",
+    "status": 200,
+    "ok": true,
+    "url": "http://localhost:3000/api/auth/me",
+    "contentType": "application/json",
+    "bodyTextLength": 352,
+    "bodyTextPreview": "{\"sub\":\"auth0|6a1a08dbc88714c316666e00\",\"email\":\"chessapp.auth0.health.1780091095180@example.com\",\"name\":\"chessapp.auth0.health.1780091095180@example.com\",\"email_verified\":false,\"has_email_verified_claim\":true,\"claim_keys\":[\"email\",\"email_verified\",\"name\",\"nickname\",\"picture\",\"sub\"],\"custom_claim_keys\":[],\"has_custom_claims\":false,\"custom_claims\":{}}",
+    "bodyJson": {
+      "sub": "auth0|6a1a08dbc88714c316666e00",
+      "email": "chessapp.auth0.health.1780091095180@example.com",
+      "name": "chessapp.auth0.health.1780091095180@example.com",
+      "email_verified": false,
+      "has_email_verified_claim": true,
+      "claim_keys": [
+        "email",
+        "email_verified",
+        "name",
+        "nickname",
+        "picture",
+        "sub"
+      ],
+      "custom_claim_keys": [],
+      "has_custom_claims": false,
+      "custom_claims": {}
+    }
+  },
+  "logoutPhase": {
+    "requested": "http://localhost:3000/api/auth/logout?returnTo=%2Flogin-test",
+    "urlAfterLogout": "http://localhost:3000/login-test"
+  },
+  "afterLogoutAuthMe": {
+    "at": "2026-05-29T21:45:04.519Z",
+    "status": 401,
+    "ok": false,
+    "url": "http://localhost:3000/api/auth/me",
+    "contentType": "application/json",
+    "bodyTextLength": 29,
+    "bodyTextPreview": "{\"error\":\"not_authenticated\"}",
+    "bodyJson": {
+      "error": "not_authenticated"
+    }
+  },
+  "finalUrl": "http://localhost:3000/login-test",
+  "pass": true,
+  "error": null
+}

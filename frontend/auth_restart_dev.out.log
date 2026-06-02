@@ -1,0 +1,18 @@
+
+> frontend@0.1.0 dev
+> next dev
+
+   ▲ Next.js 16.0.1 (Turbopack)
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.1.139:3000
+   - Environments: .env.local, .env
+
+ ✓ Starting...
+Creating turbopack project {
+  dir: 'C:\\Users\\admin\\Desktop\\ChessApp_2\\ChessApp\\frontend',
+  testMode: true
+}
+ ✓ Ready in 1372ms
+ GET /api/auth/login 307 in 388ms (compile: 214ms, proxy.ts: 155ms, render: 18ms)
+ GET /api/auth/me 401 in 296ms (compile: 278ms, proxy.ts: 6ms, render: 12ms)
+ GET /auth/me 401 in 181ms (compile: 165ms, proxy.ts: 4ms, render: 12ms)

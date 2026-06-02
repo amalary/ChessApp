@@ -1,0 +1,34 @@
+{
+  "checkedAt": "2026-05-29T21:33:51.591Z",
+  "baseUrl": "http://localhost:3000",
+  "finalUrl": "http://localhost:3000/",
+  "signupEmail": "chessapp.auth0.verify.1780090426625@example.com",
+  "verificationError": null,
+  "apiAuthMe": {
+    "at": "2026-05-29T21:33:51.502Z",
+    "status": 200,
+    "ok": true,
+    "url": "http://localhost:3000/api/auth/me",
+    "contentType": "application/json",
+    "bodyTextLength": 352,
+    "bodyTextPreview": "{\"sub\":\"auth0|6a1a063b779753423c262790\",\"email\":\"chessapp.auth0.verify.1780090426625@example.com\",\"name\":\"chessapp.auth0.verify.1780090426625@example.com\",\"email_verified\":false,\"has_email_verified_claim\":true,\"claim_keys\":[\"email\",\"email_verified\",\"name\",\"nickname\",\"picture\",\"sub\"],\"custom_claim_keys\":[],\"has_custom_claims\":false,\"custom_claims\":{}}",
+    "bodyJson": {
+      "sub": "auth0|6a1a063b779753423c262790",
+      "email": "chessapp.auth0.verify.1780090426625@example.com",
+      "name": "chessapp.auth0.verify.1780090426625@example.com",
+      "email_verified": false,
+      "has_email_verified_claim": true,
+      "claim_keys": [
+        "email",
+        "email_verified",
+        "name",
+        "nickname",
+        "picture",
+        "sub"
+      ],
+      "custom_claim_keys": [],
+      "has_custom_claims": false,
+      "custom_claims": {}
+    }
+  }
+}

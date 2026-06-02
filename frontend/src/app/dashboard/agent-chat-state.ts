@@ -89,8 +89,73 @@ const AGENT_FALLBACK_PROMPTS: AgentSuggestionChip[] = [
 ];
 
 const PUZZLE_REFERENCE_PATTERN =
-  /\b(puzzle|position|board|fen|uploaded|upload|latest|recent|last)\b/i;
+  /\b(puzzle|puzzles|position|positions|board|fen|uploaded|upload|latest|recent|last|previous|prior|ago|back|older|earlier|solve|solves|submission|submissions)\b/i;
+const RECENT_REFERENCE_PATTERN = /\b(latest|most recent|recent|last)\b/i;
+const PREVIOUS_PREVIOUS_PATTERN =
+  /\b(previous|prior)\s+(previous|prior)\b|\b(two|2)\s+puzzles?\s+ago\b|\bthird\s+(latest|most recent|recent|last)\b|\b(the\s+)?one\s+before\s+that\b/i;
+const PREVIOUS_PATTERN =
+  /\b(previous|prior)\b|\b(one|1)\s+puzzle\s+ago\b|\bbefore\s+last\b|\bsecond\s+(latest|most recent|recent|last)\b|\bone\s+back\b/i;
+const PUZZLES_AGO_PATTERN =
+  /\b(?<count>\d+|[a-z]+)\s+(?:puzzles?|solves?)\s+ago\b/i;
+const ORDINAL_RECENT_PATTERN =
+  /\b(?<ordinal>\d+(?:st|nd|rd|th)?|first|second|third|fourth|fifth)\s+(?:most\s+recent|latest|newest|last)\s+(?:puzzle|solve)?\b/i;
+const SECOND_TO_LAST_PATTERN = /\b(second|2nd)\s+(?:to\s+)?last\b/i;
+const THIRD_TO_LAST_PATTERN = /\b(third|3rd)\s+(?:to\s+)?last\b/i;
+const EARLIER_REFERENCE_PATTERN =
+  /\b(earlier|older|before)\b.*\b(one|puzzle|solve)\b|\b(one|puzzle|solve)\b.*\b(earlier|older)\b/i;
+const GO_BACK_PATTERN =
+  /\b(?:go|scroll|move)\s+back\s+(?<count>\d+|[a-z]+)\b(?:\s+(?:puzzles?|solves?))?/i;
+const BACK_COUNT_PATTERN = /\b(?<count>\d+|[a-z]+)\s+back\b(?:\s+(?:puzzles?|solves?))?/i;
+const NTH_RECENT_PATTERN =
+  /\b(?<ordinal>\d+(?:st|nd|rd|th)?|[a-z]+)\s+(?:most\s+recent|latest|newest|recent|last)\b(?:\s+(?:puzzle|solve))?/i;
+const NTH_PUZZLE_PATTERN = /\b(?:puzzle|solve)\s*(?:#|number\s+)?(?<ordinal>\d+)\b/i;
+const SUBMISSION_NUMBER_PATTERN =
+  /\bsubmission(?:\s+number)?\s*(?:#|no\.?|num(?:ber)?)?\s*(?<ordinal>\d{1,4})\b/i;
 const FILE_NAME_TOKEN_PATTERN = /[a-z0-9]{3,}/gi;
+const MOVE_TOKEN_PATTERN =
+  /\b(?:O-O(?:-O)?[+#]?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)\b/g;
+const NUMBER_WORD_TO_INT: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  first: 1,
+  second: 2,
+  third: 3,
+  fourth: 4,
+  fifth: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  sixth: 6,
+  seventh: 7,
+  eighth: 8,
+  ninth: 9,
+  tenth: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
+  twenty: 20,
+  eleventh: 11,
+  twelfth: 12,
+  thirteenth: 13,
+  fourteenth: 14,
+  fifteenth: 15,
+  sixteenth: 16,
+  seventeenth: 17,
+  eighteenth: 18,
+  nineteenth: 19,
+  twentieth: 20,
+};
 
 function isImageDataUrl(value: string | null | undefined): value is string {
   return typeof value === 'string' && value.startsWith('data:image/');
@@ -115,6 +180,147 @@ function scoreFileNameMatch(fileName: string, query: string): number {
   return score;
 }
 
+function resolveRequestedHistoryIndex(userText: string): number | null {
+  const parseIndexToken = (
+    token: string,
+    options: { offsetFromRecent: boolean },
+  ): number | null => {
+    const normalized = token.trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+    if (/^\d+$/.test(normalized)) {
+      const value = Number.parseInt(normalized, 10);
+      return options.offsetFromRecent ? Math.max(0, value - 1) : Math.max(0, value);
+    }
+    const numericPart = normalized.replace(/(st|nd|rd|th)$/i, '');
+    if (/^\d+$/.test(numericPart)) {
+      const value = Number.parseInt(numericPart, 10);
+      return options.offsetFromRecent ? Math.max(0, value - 1) : Math.max(0, value);
+    }
+    const parsed = NUMBER_WORD_TO_INT[normalized];
+    if (typeof parsed !== 'number') {
+      return null;
+    }
+    return options.offsetFromRecent ? Math.max(0, parsed - 1) : Math.max(0, parsed);
+  };
+
+  const agoMatch = userText.match(PUZZLES_AGO_PATTERN);
+  const agoRawCount = agoMatch?.groups?.count?.trim() ?? '';
+  if (agoRawCount.length > 0) {
+    const parsedAgo = parseIndexToken(agoRawCount, { offsetFromRecent: false });
+    if (parsedAgo !== null) {
+      return parsedAgo;
+    }
+  }
+
+  const goBackMatch = userText.match(GO_BACK_PATTERN);
+  const goBackRawCount = goBackMatch?.groups?.count?.trim() ?? '';
+  if (goBackRawCount.length > 0) {
+    const parsedGoBack = parseIndexToken(goBackRawCount, { offsetFromRecent: false });
+    if (parsedGoBack !== null) {
+      return parsedGoBack;
+    }
+  }
+
+  const backCountMatch = userText.match(BACK_COUNT_PATTERN);
+  const backCountRaw = backCountMatch?.groups?.count?.trim() ?? '';
+  if (backCountRaw.length > 0) {
+    const parsedBackCount = parseIndexToken(backCountRaw, { offsetFromRecent: false });
+    if (parsedBackCount !== null) {
+      return parsedBackCount;
+    }
+  }
+
+  const ordinalMatch = userText.match(ORDINAL_RECENT_PATTERN);
+  const rawOrdinal = ordinalMatch?.groups?.ordinal?.trim() ?? '';
+  if (rawOrdinal.length > 0) {
+    const parsedOrdinal = parseIndexToken(rawOrdinal, { offsetFromRecent: true });
+    if (parsedOrdinal !== null) {
+      return parsedOrdinal;
+    }
+  }
+
+  const nthRecentMatch = userText.match(NTH_RECENT_PATTERN);
+  const rawNthRecent = nthRecentMatch?.groups?.ordinal?.trim() ?? '';
+  if (rawNthRecent.length > 0) {
+    const parsedNthRecent = parseIndexToken(rawNthRecent, { offsetFromRecent: true });
+    if (parsedNthRecent !== null) {
+      return parsedNthRecent;
+    }
+  }
+
+  const nthPuzzleMatch = userText.match(NTH_PUZZLE_PATTERN);
+  const rawNthPuzzle = nthPuzzleMatch?.groups?.ordinal?.trim() ?? '';
+  if (rawNthPuzzle.length > 0) {
+    const parsedNthPuzzle = parseIndexToken(rawNthPuzzle, { offsetFromRecent: true });
+    if (parsedNthPuzzle !== null) {
+      return parsedNthPuzzle;
+    }
+  }
+
+  const submissionNumberMatch = userText.match(SUBMISSION_NUMBER_PATTERN);
+  const rawSubmissionOrdinal = submissionNumberMatch?.groups?.ordinal?.trim() ?? '';
+  if (rawSubmissionOrdinal.length > 0) {
+    const parsedSubmissionOrdinal = parseIndexToken(rawSubmissionOrdinal, {
+      offsetFromRecent: true,
+    });
+    if (parsedSubmissionOrdinal !== null) {
+      return parsedSubmissionOrdinal;
+    }
+  }
+
+  if (THIRD_TO_LAST_PATTERN.test(userText)) {
+    return 2;
+  }
+  if (SECOND_TO_LAST_PATTERN.test(userText)) {
+    return 1;
+  }
+  if (PREVIOUS_PREVIOUS_PATTERN.test(userText)) {
+    return 2;
+  }
+  if (PREVIOUS_PATTERN.test(userText)) {
+    return 1;
+  }
+  if (RECENT_REFERENCE_PATTERN.test(userText)) {
+    return 0;
+  }
+  if (EARLIER_REFERENCE_PATTERN.test(userText)) {
+    return 1;
+  }
+  return null;
+}
+
+function extractMoveTokens(text: string): Set<string> {
+  const tokens = text.match(MOVE_TOKEN_PATTERN) ?? [];
+  return new Set(tokens.map((token) => token.trim()).filter((token) => token.length > 0));
+}
+
+function scoreSolutionAlignment(
+  submission: PuzzleSubmissionRecord,
+  assistantMoveTokens: Set<string>,
+): number {
+  if (assistantMoveTokens.size === 0) {
+    return 0;
+  }
+  const solverLineTokens = buildSolverLineFromStoredLines(submission.solutionLines) ?? [];
+  if (solverLineTokens.length === 0) {
+    return 0;
+  }
+
+  let score = 0;
+  const firstToken = solverLineTokens[0];
+  if (assistantMoveTokens.has(firstToken)) {
+    score += 12;
+  }
+  for (const token of solverLineTokens.slice(0, 8)) {
+    if (assistantMoveTokens.has(token)) {
+      score += 2;
+    }
+  }
+  return score;
+}
+
 export function resolveReferencedPuzzle(input: {
   submissions: PuzzleSubmissionRecord[];
   userMessage: string;
@@ -132,6 +338,39 @@ export function resolveReferencedPuzzle(input: {
   const combinedText = `${userText} ${assistantText}`.trim();
   if (!PUZZLE_REFERENCE_PATTERN.test(combinedText)) {
     return null;
+  }
+  const requestedHistoryIndex = resolveRequestedHistoryIndex(userText);
+
+  const assistantMoveTokens = extractMoveTokens(input.assistantMessage ?? '');
+  let bestAligned: PuzzleSubmissionRecord | null = null;
+  let bestAlignmentScore = 0;
+  for (const submission of available) {
+    const alignmentScore = scoreSolutionAlignment(submission, assistantMoveTokens);
+    if (alignmentScore > bestAlignmentScore) {
+      bestAlignmentScore = alignmentScore;
+      bestAligned = submission;
+    }
+  }
+
+  if (bestAligned !== null && bestAlignmentScore > 0) {
+    return {
+      id: bestAligned.id,
+      fileName: bestAligned.fileName || 'Uploaded puzzle',
+      submittedAt: bestAligned.submittedAt,
+      fen: bestAligned.fen ?? null,
+      imageDataUrl: bestAligned.originalPuzzleImageDataUrl!,
+    };
+  }
+
+  if (requestedHistoryIndex !== null) {
+    const selectedByHistoryIndex = available[Math.min(requestedHistoryIndex, available.length - 1)];
+    return {
+      id: selectedByHistoryIndex.id,
+      fileName: selectedByHistoryIndex.fileName || 'Uploaded puzzle',
+      submittedAt: selectedByHistoryIndex.submittedAt,
+      fen: selectedByHistoryIndex.fen ?? null,
+      imageDataUrl: selectedByHistoryIndex.originalPuzzleImageDataUrl!,
+    };
   }
 
   let bestMatch: PuzzleSubmissionRecord | null = null;

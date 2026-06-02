@@ -352,7 +352,7 @@ def build_submission_history_context_for_user(
     *,
     db: Session,
     current_user: LocalAuthUser,
-    limit: int = 200,
+    limit: int = 500,
 ) -> list[dict[str, Any]]:
     submissions = list_submissions_for_user(
         db=db,
@@ -382,6 +382,7 @@ def build_submission_history_context_for_user(
                     "timeToFirstMoveSeconds"
                 ),
                 "puzzleId": first_move_assessment.get("puzzleId"),
+                "hasPuzzleImage": bool(submission.originalPuzzleImageDataUrl),
                 "solutionLines": submission.solutionLines,
             }
         )

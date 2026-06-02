@@ -3,7 +3,7 @@ import path from 'node:path';
 
 describe('dashboard agent nav wiring', () => {
   it('includes Agent nav item between Training and Settings', () => {
-    const filePath = path.resolve(process.cwd(), 'src/app/dashboard/page.tsx');
+    const filePath = path.resolve(process.cwd(), 'src/app/dashboard/dashboard-client.tsx');
     const source = fs.readFileSync(filePath, 'utf8');
 
     const trainingIndex = source.indexOf("{ label: 'Training', icon: Activity }");
@@ -16,7 +16,7 @@ describe('dashboard agent nav wiring', () => {
   });
 
   it('renders Agent page section when active', () => {
-    const filePath = path.resolve(process.cwd(), 'src/app/dashboard/page.tsx');
+    const filePath = path.resolve(process.cwd(), 'src/app/dashboard/dashboard-client.tsx');
     const source = fs.readFileSync(filePath, 'utf8');
 
     expect(source).toContain("const isAgentView = activeNavLabel === 'Agent';");

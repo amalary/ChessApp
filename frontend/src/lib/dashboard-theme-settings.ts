@@ -5,7 +5,28 @@ type LocalAuthActiveUser = {
   id?: unknown;
   username?: unknown;
   email?: unknown;
+  sessionToken?: unknown;
 };
+
+function dispatchLocalAuthActiveUserUpdatedEvent(): void {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+    return;
+  }
+
+  const EventConstructor = window.Event;
+  if (typeof EventConstructor === 'function') {
+    window.dispatchEvent(new EventConstructor(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT));
+    return;
+  }
+
+  if (typeof document === 'undefined' || typeof document.createEvent !== 'function') {
+    return;
+  }
+
+  const legacyEvent = document.createEvent('Event');
+  legacyEvent.initEvent(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT, false, false);
+  window.dispatchEvent(legacyEvent);
+}
 
 function normalizeScopePart(value: unknown): string | null {
   if (typeof value !== 'string') {
@@ -42,10 +63,32 @@ function readActiveLocalAuthUserUnsafe(): LocalAuthActiveUser | null {
   }
 }
 
+function clearLegacyLocalAuthUserIfNeeded(payload: {
+  id: string | null;
+  username: string | null;
+  email: string | null;
+  sessionToken: string | null;
+}): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  const hasIdentity = Boolean(payload.id || payload.username || payload.email);
+  const missingSessionToken = !payload.sessionToken;
+  if (!hasIdentity || !missingSessionToken) {
+    return false;
+  }
+
+  // Migration guard: pre-session-token local auth entries are no longer trusted.
+  window.localStorage.removeItem(LOCAL_AUTH_ACTIVE_USER_STORAGE_KEY);
+  dispatchLocalAuthActiveUserUpdatedEvent();
+  return true;
+}
+
 export function readActiveLocalAuthUser(): {
   id: string | null;
   username: string | null;
   email: string | null;
+  sessionToken: string | null;
 } | null {
   const raw = readActiveLocalAuthUserUnsafe();
   if (!raw) {
@@ -56,18 +99,34 @@ export function readActiveLocalAuthUser(): {
   const username =
     typeof raw.username === 'string' && raw.username.trim() ? raw.username.trim() : null;
   const email = typeof raw.email === 'string' && raw.email.trim() ? raw.email.trim() : null;
+  const sessionToken =
+    typeof raw.sessionToken === 'string' && raw.sessionToken.trim()
+      ? raw.sessionToken.trim()
+      : null;
 
   if (!id && !username && !email) {
     return null;
   }
 
-  return { id, username, email };
+  if (
+    clearLegacyLocalAuthUserIfNeeded({
+      id,
+      username,
+      email,
+      sessionToken,
+    })
+  ) {
+    return null;
+  }
+
+  return { id, username, email, sessionToken };
 }
 
 export function writeActiveLocalAuthUser(user: {
   id?: string | null;
   username?: string | null;
   email?: string | null;
+  sessionToken?: string | null;
 } | null): void {
   if (typeof window === 'undefined') {
     return;
@@ -75,7 +134,7 @@ export function writeActiveLocalAuthUser(user: {
 
   if (!user) {
     window.localStorage.removeItem(LOCAL_AUTH_ACTIVE_USER_STORAGE_KEY);
-    window.dispatchEvent(new Event(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT));
+    dispatchLocalAuthActiveUserUpdatedEvent();
     return;
   }
 
@@ -83,9 +142,10 @@ export function writeActiveLocalAuthUser(user: {
     id: typeof user.id === 'string' ? user.id : '',
     username: typeof user.username === 'string' ? user.username : '',
     email: typeof user.email === 'string' ? user.email : '',
+    sessionToken: typeof user.sessionToken === 'string' ? user.sessionToken : '',
   };
   window.localStorage.setItem(LOCAL_AUTH_ACTIVE_USER_STORAGE_KEY, JSON.stringify(normalized));
-  window.dispatchEvent(new Event(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT));
+  dispatchLocalAuthActiveUserUpdatedEvent();
 }
 
 export function resolveUserSettingsScope(auth0Sub: string | null | undefined): string | null {

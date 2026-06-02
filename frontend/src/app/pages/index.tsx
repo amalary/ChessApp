@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { AuthNav } from "@/components/AuthNav";
-import { getAccessTokenClient } from "lib/getAccessTokenClient";
+import { getRequestAuthContextClient } from "lib/getRequestAuthContextClient";
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8010";
@@ -42,9 +42,8 @@ export function SolveForm() {
     setLoading(true);
 
     try {
-      // 1) Get access token from /auth/access-token
-      const accessToken = await getAccessTokenClient();
-      if (!accessToken) {
+      const auth = await getRequestAuthContextClient();
+      if (!auth.hasAnyAuth) {
         setError("You must be logged in to solve puzzles.");
         return;
       }
@@ -53,12 +52,9 @@ export function SolveForm() {
       const formData = new FormData();
       formData.append("image", file);
 
-      // 3) Call FastAPI /solve with Authorization: Bearer <token>
       const resp = await fetch(`${BACKEND_URL}/solve`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: auth.headers,
         body: formData,
       });
 

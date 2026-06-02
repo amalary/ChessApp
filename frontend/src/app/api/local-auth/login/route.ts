@@ -30,6 +30,22 @@ export async function POST(request: Request) {
       payload = { detail: text || "Unexpected upstream response." };
     }
 
+    if (payload && typeof payload === "object") {
+      const candidate = payload as {
+        detail?: unknown;
+        error?: { message?: unknown } | unknown;
+      };
+      if (
+        (candidate.detail === undefined || candidate.detail === null) &&
+        candidate.error &&
+        typeof candidate.error === "object" &&
+        typeof (candidate.error as { message?: unknown }).message === "string"
+      ) {
+        candidate.detail = (candidate.error as { message: string }).message;
+      }
+      payload = candidate;
+    }
+
     return NextResponse.json(payload, { status: upstream.status });
   } catch (error: unknown) {
     const reason = error instanceof Error ? error.message : "unknown error";

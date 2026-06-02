@@ -76,6 +76,14 @@ SECRET_PATTERNS = (
 MOVE_TOKEN_PATTERN = re.compile(
     r"\b(?:O-O(?:-O)?[+#]?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)\b"
 )
+SUBMITTED_AT_PATTERN = re.compile(
+    r"\bSubmitted at:\s*[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:\.\+\-Z]+\b\.?",
+    re.IGNORECASE,
+)
+FILE_NAME_PATTERN = re.compile(
+    r"\b[\w\-. ]+\.(?:png|jpe?g|webp|gif|bmp)\b",
+    re.IGNORECASE,
+)
 
 ALLOWED_MODES = {"hint", "explain", "theme", "followup"}
 FULL_LINE_REQUEST_PHRASES = (
@@ -432,31 +440,49 @@ class ChessAssistantAgent:
         if not isinstance(history, list):
             return state
 
-        for item in history:
-            if not isinstance(item, dict):
-                continue
-            fen = item.get("fen")
-            if not isinstance(fen, str) or not fen.strip():
-                continue
+        normalized_current_fen = self._normalize_fen_key(state.get("fen"))
+        entries = [item for item in history if isinstance(item, dict)]
 
-            solution_lines_raw = item.get("solutionLines")
-            solution_lines: list[str] = []
-            if isinstance(solution_lines_raw, list):
-                solution_lines = [
-                    move.strip()
-                    for move in solution_lines_raw
-                    if isinstance(move, str) and move.strip()
-                ]
+        selected_entry: dict[str, Any] | None = None
+        if normalized_current_fen is not None:
+            for item in entries:
+                if (
+                    self._normalize_fen_key(self._extract_history_fen(item))
+                    != normalized_current_fen
+                ):
+                    continue
+                if self._extract_solution_lines(item):
+                    selected_entry = item
+                    break
+            # Avoid mixing a live puzzle FEN with an unrelated stored solution line.
+            if selected_entry is None:
+                return state
+        else:
+            for item in entries:
+                fen_key = self._normalize_fen_key(self._extract_history_fen(item))
+                if fen_key is None:
+                    continue
+                if self._extract_solution_lines(item):
+                    selected_entry = item
+                    break
 
-            solver_move_san = solution_lines[0] if solution_lines else None
-            return {
-                **state,
-                "fen": state.get("fen") or fen.strip(),
-                "solver_move_san": state.get("solver_move_san") or solver_move_san,
-                "solver_line": state.get("solver_line") or solution_lines,
-            }
+        if selected_entry is None:
+            return state
 
-        return state
+        selected_fen = self._normalize_fen_key(
+            self._extract_history_fen(selected_entry)
+        )
+        solution_lines = self._extract_solution_lines(selected_entry)
+        solver_move_san = solution_lines[0] if solution_lines else None
+        if selected_fen is None:
+            return state
+
+        return {
+            **state,
+            "fen": state.get("fen") or selected_fen,
+            "solver_move_san": state.get("solver_move_san") or solver_move_san,
+            "solver_line": state.get("solver_line") or solution_lines,
+        }
 
     def validate_position(self, state: ChessAssistantState) -> ChessAssistantState:
         if self._has_response(state):
@@ -642,8 +668,14 @@ class ChessAssistantAgent:
                 "history",
                 "recent puzzles",
                 "recent puzzle",
+                "recently solved",
+                "recent solves",
+                "solved puzzle",
+                "solved puzzles",
                 "last puzzle",
                 "last puzzles",
+                "latest puzzle",
+                "latest solved",
                 "accuracy trend",
                 "rating trend",
                 "my solves",
@@ -729,6 +761,17 @@ class ChessAssistantAgent:
         first_move_total = 0
         ratings: list[int] = []
         latest = history[0]
+        latest_solved = next(
+            (
+                item
+                for item in history
+                if isinstance(item, dict)
+                and self._normalize_fen_key(self._extract_history_fen(item)) is not None
+                and self._extract_solution_lines(item)
+            ),
+            None,
+        )
+        latest_reference = latest_solved or latest
 
         for item in history:
             mate_in = item.get("mateIn")
@@ -749,19 +792,83 @@ class ChessAssistantAgent:
             if first_move_total > 0
             else None
         )
-        latest_name = str(latest.get("fileName", "recent puzzle"))
-        latest_rating = latest.get("difficultyRating") or latest.get("puzzleElo")
+        latest_rating = latest_reference.get("difficultyRating") or latest_reference.get(
+            "puzzleElo"
+        )
+        latest_rating_text = (
+            str(latest_rating) if isinstance(latest_rating, int) else "unavailable"
+        )
 
         parts = [
             f"You have {total} stored puzzles.",
-            f"Latest: {latest_name} (rating {latest_rating}).",
+            f"Latest puzzle rating: {latest_rating_text}.",
             f"Solved mates logged: {solved}.",
         ]
         if avg_rating is not None:
             parts.append(f"Average rating: {avg_rating}.")
         if first_move_accuracy is not None:
             parts.append(f"First-move accuracy: {first_move_accuracy}%.")
-        return " ".join(parts)
+        return self._sanitize_history_identifiers(" ".join(parts))
+
+    def _sanitize_history_identifiers(self, text: str) -> str:
+        sanitized = SUBMITTED_AT_PATTERN.sub("", text)
+        sanitized = FILE_NAME_PATTERN.sub("puzzle image", sanitized)
+        return " ".join(sanitized.split())
+
+    def _normalize_fen_key(self, fen: Any) -> str | None:
+        if not isinstance(fen, str):
+            return None
+        stripped = fen.strip()
+        if not stripped:
+            return None
+
+        # Normalize FEN to a stable identity that ignores move counters while
+        # preserving position-relevant state.
+        try:
+            board = chess.Board(stripped)
+            turn = "w" if board.turn == chess.WHITE else "b"
+            castling = board.castling_xfen() or "-"
+            en_passant = (
+                chess.square_name(board.ep_square)
+                if board.ep_square is not None
+                else "-"
+            )
+            return f"{board.board_fen()} {turn} {castling} {en_passant}"
+        except Exception:
+            parts = stripped.split()
+            if len(parts) >= 4:
+                return " ".join(parts[:4])
+            return stripped
+
+    def _extract_history_fen(self, item: dict[str, Any]) -> Any:
+        for key in ("fen", "FEN", "positionFen", "position_fen"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return None
+
+    def _extract_solution_lines(self, item: dict[str, Any]) -> list[str]:
+        raw: Any = None
+        for key in (
+            "solutionLines",
+            "solution_lines",
+            "solverLine",
+            "solver_line",
+            "bestLine",
+            "best_line",
+        ):
+            candidate = item.get(key)
+            if candidate is not None:
+                raw = candidate
+                break
+
+        if isinstance(raw, list):
+            return [move.strip() for move in raw if isinstance(move, str) and move.strip()]
+
+        if isinstance(raw, str) and raw.strip():
+            return [token.strip() for token in raw.split() if token.strip()]
+
+        return []
 
     def _build_profile_summary(self, state: ChessAssistantState) -> str:
         profile = state.get("user_profile_context")
@@ -871,6 +978,7 @@ class ChessAssistantAgent:
             max_sentences=4,
             conversation_mode=conversation_mode,
         )
+        response_text = self._sanitize_history_identifiers(response_text)
 
         return {
             **state,

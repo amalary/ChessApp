@@ -36,12 +36,6 @@ class AgentChatGuardrailsTests(unittest.TestCase):
         mock_get_client: MagicMock,
         _mock_retrieve: MagicMock,
     ) -> None:
-        mock_client = MagicMock()
-        mock_client.models.generate_content.return_value = SimpleNamespace(
-            text="Your latest upload was puzzle.png with mate in 2."
-        )
-        mock_get_client.return_value = mock_client
-
         result = agent_chat.generate_rag_answer(
             "What was my latest puzzle?",
             user_puzzle_history=[
@@ -53,8 +47,8 @@ class AgentChatGuardrailsTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertIn("latest", result["answer"].lower())
-        mock_get_client.assert_called_once()
+        self.assertIn("referenced puzzle", result["answer"].lower())
+        mock_get_client.assert_not_called()
 
     @patch("app.services.agent_chat.retrieve_chunks")
     @patch("app.services.agent_chat._get_chat_client")
@@ -253,12 +247,99 @@ class AgentChatGuardrailsTests(unittest.TestCase):
                     "solutionLines": ["Qh4#"],
                 }
             ],
+            conversation_history=[
+                {"role": "user", "text": "Explain my latest puzzle."},
+                {"role": "assistant", "text": "We just reviewed your most recent solve."},
+            ],
         )
 
         kwargs = mock_client.models.generate_content.call_args.kwargs
         prompt = kwargs["contents"]
+        self.assertIn("CONVERSATION HISTORY CONTEXT", prompt)
+        self.assertIn("Explain my latest puzzle.", prompt)
         self.assertIn("CONVERSATIONAL MEMORY CONTEXT", prompt)
         self.assertIn("EMOTIONAL COACHING CONTEXT", prompt)
+
+    @patch("app.services.agent_chat.retrieve_chunks")
+    @patch("app.services.agent_chat._get_chat_client")
+    def test_history_query_shortcuts_to_direct_answer_without_llm(
+        self,
+        mock_get_client: MagicMock,
+        mock_retrieve: MagicMock,
+    ) -> None:
+        result = agent_chat.generate_rag_answer(
+            "What was my latest puzzle?",
+            user_puzzle_history=[
+                {
+                    "id": "puzzle-123",
+                    "fileName": "recent-puzzle.png",
+                    "submittedAt": "2026-05-20T10:00:00Z",
+                    "hasPuzzleImage": True,
+                    "puzzleElo": 1200,
+                    "mateIn": 2,
+                    "firstMoveStatus": "correct",
+                }
+            ],
+        )
+        self.assertEqual(result.get("referenced_puzzle_id"), "puzzle-123")
+        self.assertIn("referenced puzzle", result["answer"].lower())
+        self.assertIn("image", result["answer"].lower())
+        self.assertNotIn("submitted at", result["answer"].lower())
+        self.assertNotIn("recent-puzzle.png", result["answer"])
+        mock_retrieve.assert_not_called()
+        mock_get_client.assert_not_called()
+
+    @patch("app.services.agent_chat.retrieve_chunks")
+    @patch("app.services.agent_chat._get_chat_client")
+    def test_filename_reference_selects_matching_puzzle_id(
+        self,
+        mock_get_client: MagicMock,
+        mock_retrieve: MagicMock,
+    ) -> None:
+        mock_retrieve.return_value = [
+            {
+                "source_file": "docs/settings.md",
+                "chunk_index": 0,
+                "chunk_text": "Use settings from dashboard.",
+                "distance": 0.05,
+            }
+        ]
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text="Let's review that puzzle."
+        )
+        mock_get_client.return_value = mock_client
+
+        result = agent_chat.generate_rag_answer(
+            "Show me puzzle sicilian-fork-study.png",
+            user_puzzle_history=[
+                {
+                    "id": "puzzle-a",
+                    "fileName": "sicilian-fork-study.png",
+                    "submittedAt": "2026-05-20T10:00:00Z",
+                    "hasPuzzleImage": True,
+                },
+                {
+                    "id": "puzzle-b",
+                    "fileName": "quiet-pin-puzzle.png",
+                    "submittedAt": "2026-05-19T10:00:00Z",
+                    "hasPuzzleImage": True,
+                },
+            ],
+        )
+        self.assertEqual(result.get("referenced_puzzle_id"), "puzzle-a")
+
+    @patch("app.services.agent_chat.retrieve_chunks")
+    @patch("app.services.agent_chat._get_chat_client")
+    def test_history_query_without_history_returns_explicit_missing_message(
+        self,
+        mock_get_client: MagicMock,
+        mock_retrieve: MagicMock,
+    ) -> None:
+        result = agent_chat.generate_rag_answer("Show my solved puzzles")
+        self.assertIn("cannot see solved puzzle history", result["answer"].lower())
+        mock_retrieve.assert_not_called()
+        mock_get_client.assert_not_called()
 
 
 if __name__ == "__main__":

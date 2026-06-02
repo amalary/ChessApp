@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import {
   Activity,
@@ -881,10 +882,13 @@ function ReviewQueueItem({
             aria-label={`Expand puzzle image for ${entry.puzzleTitle || 'review puzzle'}`}
           >
             <div className="relative h-24 w-24 overflow-hidden rounded-lg border border-slate-200/90 bg-slate-100 sm:h-28 sm:w-28">
-              <img
+              <Image
                 src={submissionImageSrc!}
                 alt={submissionImageAlt}
-                className="h-full w-full object-contain p-1 transition group-hover:scale-[1.02]"
+                fill
+                sizes="(max-width: 640px) 96px, 112px"
+                unoptimized
+                className="object-contain p-1 transition group-hover:scale-[1.02]"
               />
             </div>
             <span className="text-[11px] uppercase tracking-[0.08em] text-slate-400">
@@ -899,11 +903,16 @@ function ReviewQueueItem({
           className="mt-3 w-full overflow-hidden rounded-xl border border-slate-200/90 bg-slate-100 p-2"
           style={{ height: '50vh', minHeight: 220, maxHeight: 620 }}
         >
-          <img
-            src={submissionImageSrc!}
-            alt={submissionImageAlt}
-            className="h-full w-full object-contain"
-          />
+          <div className="relative h-full w-full">
+            <Image
+              src={submissionImageSrc!}
+              alt={submissionImageAlt}
+              fill
+              sizes="100vw"
+              unoptimized
+              className="object-contain"
+            />
+          </div>
         </div>
       )}
 

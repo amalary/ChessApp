@@ -30,6 +30,12 @@ body {
   font-family: var(--font-geist-sans, "Segoe UI"), system-ui, -apple-system, Roboto, Arial, sans-serif;
 }
 
+html,
+body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
 .scrollbar-auto-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;

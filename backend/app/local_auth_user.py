@@ -4,6 +4,7 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db_auth import get_db
+from app.local_auth_session import verify_local_auth_session_token
 from app.models_auth import LocalAuthUser
 
 
@@ -29,10 +30,35 @@ def get_optional_local_auth_user(
     x_local_auth_user_id: str | None = Header(
         default=None, alias="X-Local-Auth-User-Id"
     ),
+    x_local_auth_session: str | None = Header(
+        default=None, alias="X-Local-Auth-Session"
+    ),
 ) -> LocalAuthUser | None:
+    has_user_id = isinstance(x_local_auth_user_id, str) and bool(
+        x_local_auth_user_id.strip()
+    )
+    has_session = isinstance(x_local_auth_session, str) and bool(
+        x_local_auth_session.strip()
+    )
+
+    if not has_user_id and not has_session:
+        return None
+
+    if has_user_id != has_session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="X-Local-Auth-User-Id and X-Local-Auth-Session are both required.",
+        )
+
     user_id = _parse_local_auth_user_id(x_local_auth_user_id)
     if user_id is None:
         return None
+    session_token = (x_local_auth_session or "").strip()
+    if not verify_local_auth_session_token(session_token, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid local auth session.",
+        )
 
     user = db.get(LocalAuthUser, user_id)
     if user is None:

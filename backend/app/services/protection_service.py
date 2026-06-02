@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+import os
+import re
 from dataclasses import dataclass
+from io import BytesIO
+from pathlib import Path
 from typing import AsyncGenerator, Awaitable, Callable
 from uuid import uuid4
 
 from fastapi import File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
+from PIL import Image, UnidentifiedImageError
 from redis.asyncio import Redis
 
 from app.api.errors import error_response
@@ -44,6 +50,31 @@ FAILED_SOLVE_BLOCK_SECONDS = 15 * 60
 ENGINE_LOCK_TTL_SECONDS = 8
 MAX_SOLVE_IMAGE_BYTES = 10 * 1024 * 1024
 ALLOWED_SOLVE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+SOLVE_IP_LIMIT = 20
+SOLVE_USER_LIMIT = 10
+SOLVE_WINDOW_SECONDS = 60
+MAX_SOLVE_IMAGE_WIDTH = 6000
+MAX_SOLVE_IMAGE_HEIGHT = 6000
+MAX_SOLVE_IMAGE_PIXELS = 25_000_000
+
+_ALLOWED_SOLVE_FORMAT_TO_MIME = {
+    "JPEG": "image/jpeg",
+    "PNG": "image/png",
+    "WEBP": "image/webp",
+}
+_EXTENSION_TO_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+_MIME_TO_EXTENSION = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_TRUSTED_PROXY_CIDRS_DEFAULT = "127.0.0.1/32,::1/128"
 
 HEALTH_PATHS = ("/health",)
 SENSITIVE_PATH_PREFIXES = (
@@ -52,6 +83,44 @@ SENSITIVE_PATH_PREFIXES = (
     "/profile",
 )
 ANALYTICS_PATH_PREFIXES = ("/analytics", "/dashboard")
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _trusted_proxy_networks() -> list[ipaddress._BaseNetwork]:
+    configured = os.getenv("TRUSTED_PROXY_CIDRS", _TRUSTED_PROXY_CIDRS_DEFAULT)
+    networks: list[ipaddress._BaseNetwork] = []
+    for chunk in configured.split(","):
+        candidate = chunk.strip()
+        if not candidate:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(candidate, strict=False))
+        except ValueError:
+            logger.warning("Ignoring invalid TRUSTED_PROXY_CIDRS value: %s", candidate)
+    return networks
+
+
+TRUSTED_PROXY_NETWORKS = _trusted_proxy_networks()
+
+
+def _is_trusted_proxy_ip(ip_text: str | None) -> bool:
+    if not ip_text:
+        return False
+    try:
+        ip_obj = ipaddress.ip_address(ip_text)
+    except ValueError:
+        return False
+    return any(ip_obj in network for network in TRUSTED_PROXY_NETWORKS)
 
 
 class RateLimitViolation(Exception):
@@ -89,11 +158,18 @@ class ValidatedSolveUpload:
 
 
 def client_ip(request: Request) -> str:
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    if forwarded_for:
-        return forwarded_for.split(",", 1)[0].strip()
-    if request.client and request.client.host:
-        return request.client.host
+    remote_ip = request.client.host if request.client and request.client.host else None
+    if _is_trusted_proxy_ip(remote_ip):
+        forwarded_for = request.headers.get("X-Forwarded-For", "")
+        if forwarded_for:
+            first_hop = forwarded_for.split(",", 1)[0].strip()
+            try:
+                ipaddress.ip_address(first_hop)
+                return first_hop
+            except ValueError:
+                logger.warning("Ignoring malformed X-Forwarded-For value: %s", first_hop)
+    if remote_ip:
+        return remote_ip
     return "127.0.0.1"
 
 
@@ -218,6 +294,38 @@ async def enforce_global_limits(
         )
         if user_response is not None:
             return user_response
+
+    if path == "/solve":
+        solve_ip_response = await _enforce_fixed_window_rule(
+            request=request,
+            actor=actor,
+            redis_client=redis_client,
+            rule=FixedWindowRule(
+                key=f"rate_limit:ip:{actor.ip}:solve",
+                limit=_env_int("SOLVE_IP_LIMIT", SOLVE_IP_LIMIT),
+                window_seconds=_env_int("SOLVE_WINDOW_SECONDS", SOLVE_WINDOW_SECONDS),
+                reason="solve_ip_rate_limit",
+            ),
+        )
+        if solve_ip_response is not None:
+            return solve_ip_response
+
+        if actor.user_id:
+            solve_user_response = await _enforce_fixed_window_rule(
+                request=request,
+                actor=actor,
+                redis_client=redis_client,
+                rule=FixedWindowRule(
+                    key=f"rate_limit:user:{actor.user_id}:solve",
+                    limit=_env_int("SOLVE_USER_LIMIT", SOLVE_USER_LIMIT),
+                    window_seconds=_env_int(
+                        "SOLVE_WINDOW_SECONDS", SOLVE_WINDOW_SECONDS
+                    ),
+                    reason="solve_user_rate_limit",
+                ),
+            )
+            if solve_user_response is not None:
+                return solve_user_response
 
     if _is_sensitive_path(path):
         sensitive_id = actor.user_id or actor.ip
@@ -354,7 +462,7 @@ class EngineLock:
             redis_client=self._redis,
             key=self._key,
             value=self._value,
-            ttl_seconds=ENGINE_LOCK_TTL_SECONDS,
+            ttl_seconds=_env_int("SOLVE_ENGINE_LOCK_TTL_SECONDS", ENGINE_LOCK_TTL_SECONDS),
         )
         if not acquired:
             _log_block(reason="engine_lock_busy", request=request, actor=self._actor)
@@ -444,8 +552,54 @@ async def validate_solve_upload(
         await record_failed_solve_attempt(request)
         raise HTTPException(status_code=400, detail="Invalid file type or size.")
 
+    supplied_name = (image.filename or "").strip()
+    supplied_extension = Path(supplied_name).suffix.lower() if supplied_name else ""
+    if supplied_extension and supplied_extension not in _EXTENSION_TO_MIME:
+        await record_failed_solve_attempt(request)
+        raise HTTPException(status_code=400, detail="Invalid file type or size.")
+    if supplied_extension and _EXTENSION_TO_MIME[supplied_extension] != content_type:
+        await record_failed_solve_attempt(request)
+        raise HTTPException(status_code=400, detail="Invalid file type or size.")
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as decoded:
+            decoded.verify()
+        with Image.open(BytesIO(image_bytes)) as decoded:
+            width, height = decoded.size
+            decoded_format = (decoded.format or "").upper()
+    except (UnidentifiedImageError, OSError, ValueError):
+        await record_failed_solve_attempt(request)
+        raise HTTPException(status_code=400, detail="Invalid file type or size.")
+
+    resolved_mime = _ALLOWED_SOLVE_FORMAT_TO_MIME.get(decoded_format)
+    if resolved_mime is None:
+        await record_failed_solve_attempt(request)
+        raise HTTPException(status_code=400, detail="Invalid file type or size.")
+    if resolved_mime != content_type:
+        await record_failed_solve_attempt(request)
+        raise HTTPException(status_code=400, detail="Invalid file type or size.")
+
+    max_width = _env_int("MAX_SOLVE_IMAGE_WIDTH", MAX_SOLVE_IMAGE_WIDTH)
+    max_height = _env_int("MAX_SOLVE_IMAGE_HEIGHT", MAX_SOLVE_IMAGE_HEIGHT)
+    max_pixels = _env_int("MAX_SOLVE_IMAGE_PIXELS", MAX_SOLVE_IMAGE_PIXELS)
+    if (
+        width <= 0
+        or height <= 0
+        or width > max_width
+        or height > max_height
+        or (width * height) > max_pixels
+    ):
+        await record_failed_solve_attempt(request)
+        raise HTTPException(status_code=400, detail="Invalid file type or size.")
+
+    safe_stem = Path(supplied_name).stem if supplied_name else ""
+    safe_stem = _SAFE_FILENAME_RE.sub("-", safe_stem).strip("._-")[:80]
+    if not safe_stem:
+        safe_stem = "uploaded-puzzle"
+    normalized_filename = f"{safe_stem}{_MIME_TO_EXTENSION[resolved_mime]}"
+
     return ValidatedSolveUpload(
-        filename=image.filename,
-        content_type=content_type,
+        filename=normalized_filename,
+        content_type=resolved_mime,
         data=image_bytes,
     )

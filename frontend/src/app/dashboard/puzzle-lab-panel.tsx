@@ -25,7 +25,7 @@ import {
   WandSparkles,
   Zap,
 } from 'lucide-react';
-import { getAccessTokenClient } from 'lib/getAccessTokenClient';
+import { getRequestAuthContextClient } from 'lib/getRequestAuthContextClient';
 import {
   addPuzzleSubmission,
   estimatePuzzleElo,
@@ -33,7 +33,6 @@ import {
   readPuzzleSubmissions,
   type PuzzleSubmissionRecord,
 } from '@/lib/puzzle-submissions';
-import { readActiveLocalAuthUser } from '@/lib/dashboard-theme-settings';
 import type { AssistantConversationMode } from '@/lib/assistant-conversation-mode';
 import { formatConversationalText } from '@/lib/assistant-rhythm';
 import {
@@ -211,6 +210,50 @@ function writeStoredJson(key: string, value: unknown): void {
     window.localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // Ignore storage errors and keep runtime state.
+  }
+}
+
+function loadImageFromObjectUrl(objectUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new window.Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Failed to load puzzle image'));
+    image.src = objectUrl;
+  });
+}
+
+async function createSubmissionImageDataUrl(file: File): Promise<string | null> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return null;
+  }
+
+  if (!file.type.startsWith('image/')) {
+    return null;
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await loadImageFromObjectUrl(objectUrl);
+    const maxDimension = 320;
+    const largestDimension = Math.max(image.naturalWidth, image.naturalHeight);
+    const scale = largestDimension > maxDimension ? maxDimension / largestDimension : 1;
+    const targetWidth = Math.max(1, Math.round(image.naturalWidth * scale));
+    const targetHeight = Math.max(1, Math.round(image.naturalHeight * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      return null;
+    }
+
+    context.drawImage(image, 0, 0, targetWidth, targetHeight);
+    return canvas.toDataURL('image/jpeg', 0.8);
+  } catch {
+    return null;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
   }
 }
 
@@ -1288,15 +1331,14 @@ export function PuzzleLabPanel({
     formData.append('expected_side_to_move', expectedSideToMove);
 
     try {
-      const headers: HeadersInit = {};
-      const localAuthUserId = readActiveLocalAuthUser()?.id ?? null;
-      if (localAuthUserId) {
-        headers['X-Local-Auth-User-Id'] = localAuthUserId;
+      const auth = await getRequestAuthContextClient();
+      if (!auth.hasAnyAuth) {
+        throw new Error('Authentication is required.');
       }
 
       const solveResponse = await fetch(`${backendUrl}/solve`, {
         method: 'POST',
-        headers,
+        headers: auth.headers,
         body: formData,
       });
 
@@ -1339,8 +1381,10 @@ export function PuzzleLabPanel({
       let assistantThemeTags: string[] = [];
 
       try {
-        const token = await getAccessTokenClient();
-        if (token) {
+        const assistantAuth = await getRequestAuthContextClient({
+          includeJsonContentType: true,
+        });
+        if (assistantAuth.hasAnyAuth) {
           const assistantPayload = {
             puzzle_id: createId('upload'),
             fen: normalizedFen,
@@ -1354,11 +1398,7 @@ export function PuzzleLabPanel({
 
           const assistantResponse = await fetch(`${backendUrl}/assistant`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-              ...(localAuthUserId ? { 'X-Local-Auth-User-Id': localAuthUserId } : {}),
-            },
+            headers: assistantAuth.headers,
             body: JSON.stringify(assistantPayload),
           });
 
@@ -1424,6 +1464,7 @@ export function PuzzleLabPanel({
       setAnalysis(nextAnalysis);
       initializeSandboxFromFen(normalizedFen, solveMeta.sideToMove ?? expectedSideToMove);
       setPlaybackIndex(0);
+      const originalPuzzleImageDataUrl = await createSubmissionImageDataUrl(file);
 
       addPuzzleSubmission({
         fileName: file.name,
@@ -1439,7 +1480,7 @@ export function PuzzleLabPanel({
           mateIn: solveMeta.mateIn,
         },
         solutionLines: solutionSan,
-        originalPuzzleImageDataUrl: null,
+        originalPuzzleImageDataUrl,
       });
 
       if (solveMeta.mateFound === false) {
@@ -1664,11 +1705,12 @@ export function PuzzleLabPanel({
     setSandboxHintLoading(true);
     setSandboxHint(null);
     try {
-      const token = await getAccessTokenClient();
+      const auth = await getRequestAuthContextClient({
+        includeJsonContentType: true,
+      });
       const currentFen = boardToFen(sandboxBoard, sandboxSideToMove);
-      const localAuthUserId = readActiveLocalAuthUser()?.id ?? null;
 
-      if (!token) {
+      if (!auth.hasAnyAuth) {
         setSandboxHint(
           formatConversationalText(
             'No Auth0 token found. Start with forcing checks, then captures from your strongest attacker.',
@@ -1691,11 +1733,7 @@ export function PuzzleLabPanel({
 
       const response = await fetch(`${backendUrl}/assistant`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-          ...(localAuthUserId ? { 'X-Local-Auth-User-Id': localAuthUserId } : {}),
-        },
+        headers: auth.headers,
         body: JSON.stringify(payload),
       });
 

@@ -3,11 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/next-dev.cjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest --configLoader runner run"
+    "test": "vitest --configLoader runner run",
+    "auth:probe": "node auth0-universal-login-probe.cjs",
+    "auth:verify-session": "node auth0-session-verify.cjs",
+    "auth:health": "node auth0-health-check.cjs"
   },
   "dependencies": {
     "@auth0/nextjs-auth0": "^4.13.1",
@@ -23,8 +26,10 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
+    "baseline-browser-mapping": "^2.10.32",
     "eslint": "^9",
     "eslint-config-next": "16.0.1",
+    "playwright": "^1.60.0",
     "prettier": "^3.6.2",
     "tailwindcss": "^4",
     "typescript": "^5",

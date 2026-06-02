@@ -1,9 +1,12 @@
-import { readActiveLocalAuthUser } from '@/lib/dashboard-theme-settings';
 import type { AssistantConversationMode } from '@/lib/assistant-conversation-mode';
+import { getRequestAuthContextClient } from 'lib/getRequestAuthContextClient';
 
 export type AgentChatResponse = {
   query: string;
   answer: string;
+  referencedPuzzleId: string | null;
+  referencedPuzzleSubmittedAt: string | null;
+  referencedPuzzleFileName: string | null;
 };
 
 type AgentChatErrorPayload = {
@@ -17,6 +20,9 @@ type AgentChatErrorPayload = {
 type AgentChatRequest = {
   query: string;
   limit?: number;
+  conversationHistory?: Array<{ role: 'assistant' | 'user'; text: string }>;
+  clientPuzzleHistory?: Array<Record<string, unknown>>;
+  activeReferencedPuzzleId?: string | null;
   conversationMode?: AssistantConversationMode;
   signal?: AbortSignal;
   backendUrl?: string;
@@ -37,6 +43,20 @@ function parseAgentChatResponse(payload: unknown): AgentChatResponse {
   return {
     query: candidate.query,
     answer: candidate.answer.trim(),
+    referencedPuzzleId:
+      typeof candidate.referenced_puzzle_id === 'string' && candidate.referenced_puzzle_id.trim().length > 0
+        ? candidate.referenced_puzzle_id
+        : null,
+    referencedPuzzleSubmittedAt:
+      typeof candidate.referenced_puzzle_submitted_at === 'string' &&
+      candidate.referenced_puzzle_submitted_at.trim().length > 0
+        ? candidate.referenced_puzzle_submitted_at
+        : null,
+    referencedPuzzleFileName:
+      typeof candidate.referenced_puzzle_file_name === 'string' &&
+      candidate.referenced_puzzle_file_name.trim().length > 0
+        ? candidate.referenced_puzzle_file_name
+        : null,
   };
 }
 
@@ -62,6 +82,9 @@ function parseErrorMessage(payload: AgentChatErrorPayload, fallback: string): st
 export async function requestAgentChat({
   query,
   limit = 5,
+  conversationHistory,
+  clientPuzzleHistory,
+  activeReferencedPuzzleId,
   conversationMode,
   signal,
   backendUrl,
@@ -72,21 +95,21 @@ export async function requestAgentChat({
   }
 
   const rootUrl = backendUrl ?? process.env.NEXT_PUBLIC_BACKEND_URL ?? DEFAULT_BACKEND_URL;
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-  };
-  const localAuthUserId = readActiveLocalAuthUser()?.id ?? null;
-  if (localAuthUserId) {
-    headers['X-Local-Auth-User-Id'] = localAuthUserId;
+  const auth = await getRequestAuthContextClient({ includeJsonContentType: true });
+  if (!auth.hasAnyAuth) {
+    throw new Error('Authentication is required.');
   }
   let response: Response;
   try {
     response = await fetch(`${rootUrl}/agent/chat`, {
       method: 'POST',
-      headers,
+      headers: auth.headers,
       body: JSON.stringify({
         query: normalizedQuery,
         limit,
+        conversation_history: conversationHistory ?? null,
+        client_puzzle_history: clientPuzzleHistory ?? null,
+        active_referenced_puzzle_id: activeReferencedPuzzleId ?? null,
         conversation_mode: conversationMode ?? 'coach',
       }),
       signal,

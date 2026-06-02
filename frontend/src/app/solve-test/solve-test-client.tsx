@@ -5,7 +5,7 @@ import { useUser } from '@auth0/nextjs-auth0/client';
 import { useTheme } from 'next-themes';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
-import { CheckCircle2, Crown, LayoutDashboard } from 'lucide-react';
+import { Activity, CheckCircle2, Crown, House, LayoutDashboard, Puzzle, UserRound } from 'lucide-react';
 import {
   addPuzzleSubmission,
   estimatePuzzleElo,
@@ -44,6 +44,7 @@ import {
   formatConversationalText,
   type AssistantRhythmIntent,
 } from '@/lib/assistant-rhythm';
+import { getRequestAuthContextClient } from 'lib/getRequestAuthContextClient';
 
 const DASHBOARD_ACCENT_STORAGE_KEY = 'chessapp.dashboard.accent';
 const DASHBOARD_SECONDARY_STORAGE_KEY = 'chessapp.dashboard.secondary';
@@ -537,7 +538,7 @@ function buildAmyCue(input: AmyCueInput, mode: AmyConversationMode): string {
 
 export default function SolveTestClient() {
   const { theme, setTheme, resolvedTheme } = useTheme();
-  const { user } = useUser();
+  const { user, isLoading: isUserLoading } = useUser();
   const router = useRouter();
   const searchParams = useSearchParams();
   const retrySubmissionId = searchParams?.get('retrySubmissionId')?.trim() ?? '';
@@ -580,6 +581,8 @@ export default function SolveTestClient() {
   const [settingsStorageScope, setSettingsStorageScope] = useState<string | null>(null);
   const [parallaxTiltX, setParallaxTiltX] = useState(0);
   const [parallaxTiltY, setParallaxTiltY] = useState(0);
+  const [hasVerifiedAuthState, setHasVerifiedAuthState] = useState(false);
+  const [hasAuthenticatedSession, setHasAuthenticatedSession] = useState(false);
   const appliedThemeScopeRef = React.useRef<string | null>(null);
   const hydratedRetrySubmissionIdRef = React.useRef<string | null>(null);
   const submitStatusReturnTimerRef = React.useRef<number | null>(null);
@@ -668,6 +671,39 @@ export default function SolveTestClient() {
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
+
+  useEffect(() => {
+    if (!isMounted || isUserLoading) {
+      return;
+    }
+
+    const syncAuthState = () => {
+      const localAuthUser = readActiveLocalAuthUser();
+      const hasSession =
+        Boolean(user?.sub) ||
+        Boolean(localAuthUser?.id && localAuthUser?.sessionToken);
+      setHasAuthenticatedSession(hasSession);
+      setHasVerifiedAuthState(true);
+      if (!hasSession) {
+        const returnTo =
+          typeof window === 'undefined'
+            ? '/solve-test'
+            : `${window.location.pathname}${window.location.search}`;
+        router.replace(`/login-test?mode=login&returnTo=${encodeURIComponent(returnTo)}`);
+      }
+    };
+
+    syncAuthState();
+    window.addEventListener('storage', syncAuthState);
+    window.addEventListener('focus', syncAuthState);
+    window.addEventListener(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT, syncAuthState);
+
+    return () => {
+      window.removeEventListener('storage', syncAuthState);
+      window.removeEventListener('focus', syncAuthState);
+      window.removeEventListener(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT, syncAuthState);
+    };
+  }, [isMounted, isUserLoading, router, user?.sub]);
 
   useEffect(() => {
     const syncUnseenCount = () => {
@@ -873,22 +909,19 @@ export default function SolveTestClient() {
   }, [amyConversationMode]);
 
   useEffect(() => {
-    const localAuthUser = readActiveLocalAuthUser();
-    const localAuthUserId = localAuthUser?.id ?? '';
-    if (!localAuthUserId) {
-      return;
-    }
-
     let cancelled = false;
     const controller = new AbortController();
 
     async function loadStoredSubmissions() {
       try {
+        const auth = await getRequestAuthContextClient();
+        if (!auth.hasAnyAuth) {
+          return;
+        }
+
         const response = await fetch(`${backendUrl}/puzzles/submissions?limit=500`, {
           method: 'GET',
-          headers: {
-            'X-Local-Auth-User-Id': localAuthUserId,
-          },
+          headers: auth.headers,
           signal: controller.signal,
           cache: 'no-store',
         });
@@ -901,7 +934,14 @@ export default function SolveTestClient() {
         if (cancelled || !Array.isArray(payload)) {
           return;
         }
-        replacePuzzleSubmissions(payload as PuzzleSubmissionRecord[]);
+        const incoming = payload as PuzzleSubmissionRecord[];
+        const existingLocal = readPuzzleSubmissions();
+        if (incoming.length === 0 && existingLocal.length > 0) {
+          // Defensive fallback: keep local solved history if server-side history
+          // is temporarily empty (for example due to auth linkage drift).
+          return;
+        }
+        replacePuzzleSubmissions(incoming);
       } catch {
         // Keep local-only behavior when backend history fetch fails.
       }
@@ -1037,8 +1077,6 @@ export default function SolveTestClient() {
       return;
     }
 
-    const token = process.env.NEXT_PUBLIC_AUTH0_TEST_TOKEN;
-
     const formData = new FormData();
     formData.append('image', file);
     formData.append('expected_side_to_move', queenIsWhite ? 'white' : 'black');
@@ -1053,18 +1091,20 @@ export default function SolveTestClient() {
     setLoading(true);
 
     try {
-      const headers: HeadersInit = {};
-      const localAuthUserId = readActiveLocalAuthUser()?.id ?? null;
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
+      const auth = await getRequestAuthContextClient();
+      if (!auth.hasAnyAuth) {
+        setError('Authentication is required. Please log in and try again.');
+        setSubmitStatus('idle');
+        clearAmyTimers();
+        setAmyPhase('idle');
+        setAmyIsTyping(false);
+        return;
       }
-      if (localAuthUserId) {
-        headers['X-Local-Auth-User-Id'] = localAuthUserId;
-      }
+      const localAuthUserId = auth.localAuthUserId;
 
       const res = await fetch(`${backendUrl}/solve`, {
         method: 'POST',
-        headers,
+        headers: auth.headers,
         body: formData,
       });
 
@@ -1193,6 +1233,18 @@ export default function SolveTestClient() {
     setIsTransitioningToDashboard(true);
     window.setTimeout(() => {
       router.push('/dashboard');
+    }, 280);
+  };
+
+  const handleMobileNavClick = (target: 'home' | 'training' | 'profile') => {
+    if (loading || isTransitioningToDashboard) {
+      return;
+    }
+    setIsTransitioningToDashboard(true);
+    const section =
+      target === 'training' ? 'Training' : target === 'profile' ? 'Settings' : 'Dashboard';
+    window.setTimeout(() => {
+      router.push(`/dashboard?section=${encodeURIComponent(section)}`);
     }, 280);
   };
 
@@ -1334,13 +1386,13 @@ export default function SolveTestClient() {
     : undefined;
   const themedButtonStyle = chessAppPanelStyle;
 
-  if (!isMounted) {
-    return <main className="min-h-screen flex items-center justify-center p-6" />;
+  if (!isMounted || !hasVerifiedAuthState || !hasAuthenticatedSession) {
+    return <main className="min-h-screen flex items-center justify-center p-4 sm:p-6" />;
   }
 
   return (
     <main
-      className="min-h-screen flex items-center justify-center p-6 cinematic-amy-scene"
+      className="min-h-screen overflow-x-clip flex items-start justify-center px-3 pb-24 pt-4 sm:px-4 sm:pb-28 md:items-center md:p-6 cinematic-amy-scene"
       style={{ background: pageBackground }}
     >
       <div className="amy-scene-atmosphere" aria-hidden="true">
@@ -1359,7 +1411,7 @@ export default function SolveTestClient() {
         style={boardIntensityStyle}
       >
         <div
-          className="neumo-surface p-8 md:p-10 relative solve-cinematic-panel"
+          className="neumo-surface p-5 sm:p-6 md:p-10 relative solve-cinematic-panel"
           style={chessAppPanelStyle}
           onPointerMove={handlePanelPointerMove}
           onPointerLeave={handlePanelPointerLeave}
@@ -1367,18 +1419,18 @@ export default function SolveTestClient() {
           <div className="solve-cinematic-layer solve-cinematic-layer--back" aria-hidden="true" />
           <div className="solve-cinematic-layer solve-cinematic-layer--mid" aria-hidden="true" />
           <div className="solve-cinematic-layer solve-cinematic-layer--front" aria-hidden="true" />
-          <div className="absolute top-4 left-4">
+          <div className="absolute left-3 top-3 sm:left-4 sm:top-4">
             <button
               type="button"
               onClick={handleQueenClick}
               disabled={controlsLocked}
-              className={`neumo-pill h-12 w-12 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 ${pressable}`}
+              className={`neumo-pill h-10 w-10 sm:h-12 sm:w-12 flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 ${pressable}`}
               style={themedButtonStyle}
               aria-label={`Side to move: ${queenIsWhite ? 'white' : 'black'}. Click to toggle.`}
               title={`Side to move: ${queenIsWhite ? 'white' : 'black'}`}
             >
               <Crown
-                className="h-6 w-6 transition-colors duration-200"
+                className="h-5 w-5 sm:h-6 sm:w-6 transition-colors duration-200"
                 color={queenStroke}
                 fill={queenIsWhite ? 'none' : queenStroke}
                 strokeWidth={2.2}
@@ -1386,7 +1438,7 @@ export default function SolveTestClient() {
             </button>
           </div>
 
-          <div className="absolute top-4 right-4 flex items-center gap-2">
+          <div className="absolute right-3 top-3 flex max-w-[72%] flex-wrap items-center justify-end gap-2 sm:right-4 sm:top-4 sm:max-w-none">
             <button
               type="button"
               onClick={handleDashboardClick}
@@ -1396,7 +1448,7 @@ export default function SolveTestClient() {
               aria-label="Open dashboard"
             >
               <LayoutDashboard className="h-4 w-4" />
-              Dashboard
+              <span className="hidden sm:inline">Dashboard</span>
               {unseenSubmissionCount > 0 && (
                 <span
                   className="absolute -top-2 -right-2 min-w-5 h-5 px-1 rounded-full bg-red-600 text-white text-[11px] leading-none font-semibold flex items-center justify-center shadow-[0_2px_8px_rgba(220,38,38,0.45)]"
@@ -1411,7 +1463,7 @@ export default function SolveTestClient() {
               type="button"
               onClick={() => setTheme(isDark ? 'light' : 'dark')}
               disabled={controlsLocked}
-              className={`neumo-pill px-4 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed ${pressable}`}
+              className={`neumo-pill px-3 sm:px-4 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed ${pressable}`}
               style={themedButtonStyle}
               aria-label="Toggle theme"
             >
@@ -1435,7 +1487,7 @@ export default function SolveTestClient() {
                   htmlFor={controlsLocked ? undefined : fileInputId}
                   onClick={controlsLocked ? (e) => e.preventDefault() : undefined}
                   aria-disabled={controlsLocked}
-                  className={`neumo-pill px-8 py-4 text-lg font-medium tracking-tight ${pressable} ${controlsLocked ? 'cursor-not-allowed opacity-60 pointer-events-none' : 'cursor-pointer'}`}
+                  className={`neumo-pill px-6 py-3 text-base sm:px-8 sm:py-4 sm:text-lg font-medium tracking-tight ${pressable} ${controlsLocked ? 'cursor-not-allowed opacity-60 pointer-events-none' : 'cursor-pointer'}`}
                   style={themedButtonStyle}
                 >
                   Upload Image
@@ -1446,7 +1498,7 @@ export default function SolveTestClient() {
             <div className={`${file ? 'mt-6' : 'mt-10'} flex justify-center`}>
               {previewUrl ? (
                 <div className="space-y-3">
-                  <div className="neumo-ring w-[260px] h-[260px] rounded-[28px] p-4 flex items-center justify-center chess-board-shell">
+                  <div className="neumo-ring h-[240px] w-[240px] rounded-[28px] p-4 sm:h-[260px] sm:w-[260px] flex items-center justify-center chess-board-shell">
                     <div
                       className={`w-full h-full rounded-[20px] overflow-hidden flex items-center justify-center relative chess-board-stage ${
                         canClickPuzzleToReplace ? 'cursor-pointer group' : ''
@@ -1568,7 +1620,7 @@ export default function SolveTestClient() {
                   aria-label="Upload or replace puzzle image"
                   aria-disabled={controlsLocked}
                 >
-                  <div className="neumo-ring w-[260px] h-[260px] rounded-[28px] p-4 flex items-center justify-center">
+                  <div className="neumo-ring h-[240px] w-[240px] rounded-[28px] p-4 sm:h-[260px] sm:w-[260px] flex items-center justify-center">
                     <div className="w-full h-full rounded-[20px] overflow-hidden flex items-center justify-center relative">
                       <div
                         className={`w-full h-full neumo-inset flex items-center justify-center transition-all duration-150 ${controlsLocked ? '' : 'group-hover:brightness-[1.03] group-hover:scale-[1.01]'}`}
@@ -1636,7 +1688,7 @@ export default function SolveTestClient() {
                       <label
                         htmlFor={controlsLocked ? undefined : fileInputId}
                         onClick={controlsLocked ? (e) => e.preventDefault() : undefined}
-                        className={`neumo-pill w-full h-full px-8 py-3 text-base font-medium whitespace-nowrap flex items-center justify-center ${pressable} ${
+                        className={`neumo-pill w-full h-full px-6 py-3 text-sm sm:px-8 sm:text-base font-medium text-center flex items-center justify-center ${pressable} ${
                           controlsLocked ? 'cursor-not-allowed opacity-60 pointer-events-none' : 'cursor-pointer'
                         }`}
                         style={themedButtonStyle}
@@ -1668,8 +1720,8 @@ export default function SolveTestClient() {
             </div>
           )}
 
-          <div className="mt-10 neumo-surface-soft p-8 solve-cinematic-solution" style={chessAppPanelStyle}>
-            <h2 className="text-4xl font-semibold tracking-tight mb-5">Solution</h2>
+          <div className="mt-8 neumo-surface-soft p-5 sm:p-6 md:p-8 solve-cinematic-solution" style={chessAppPanelStyle}>
+            <h2 className="mb-4 text-2xl font-semibold tracking-tight sm:mb-5 sm:text-3xl md:text-4xl">Solution</h2>
             <div className="mb-5 flex flex-wrap gap-2">
               {AMY_CONVERSATION_MODE_ORDER.map((mode) => {
                 const isActive = amyConversationMode === mode;
@@ -1745,7 +1797,7 @@ export default function SolveTestClient() {
             )}
 
             {solutionLines.length > 0 ? (
-              <ol className="space-y-3 text-2xl md:text-[28px] leading-snug">
+              <ol className="space-y-3 text-lg leading-snug sm:text-2xl md:text-[28px]">
                 {solutionLines.slice(0, visibleSolutionCount).map((line, idx) => (
                   <li key={`${idx}-${line}`} className="flex gap-4 chess-stream-item">
                     <span className="w-8 text-right opacity-70">{idx + 1}.</span>
@@ -1831,6 +1883,45 @@ export default function SolveTestClient() {
           </div>
         </div>
       </div>
+      <nav className="fixed inset-x-3 bottom-3 z-40 lg:hidden" aria-label="Mobile navigation">
+        <div
+          className="mx-auto flex w-full max-w-xl items-center gap-2 rounded-2xl border border-slate-200/70 bg-white/70 p-2 shadow-[0_14px_34px_rgba(15,23,42,0.2)] backdrop-blur-xl dark:border-slate-500/65 dark:bg-slate-900/78"
+          style={chessAppPanelStyle}
+        >
+          <button
+            type="button"
+            onClick={() => handleMobileNavClick('home')}
+            className="flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[11px] font-semibold text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-100"
+          >
+            <House className="h-4 w-4" />
+            <span className="truncate">Home</span>
+          </button>
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[11px] font-semibold neumo-pill text-slate-800 dark:text-slate-100"
+            aria-current="page"
+          >
+            <Puzzle className="h-4 w-4" />
+            <span className="truncate">Solve</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleMobileNavClick('training')}
+            className="flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[11px] font-semibold text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-100"
+          >
+            <Activity className="h-4 w-4" />
+            <span className="truncate">Training</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleMobileNavClick('profile')}
+            className="flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[11px] font-semibold text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-100"
+          >
+            <UserRound className="h-4 w-4" />
+            <span className="truncate">Profile</span>
+          </button>
+        </div>
+      </nav>
     </main>
   );
 }

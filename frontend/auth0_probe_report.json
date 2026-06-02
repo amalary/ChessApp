@@ -1,0 +1,165 @@
+{
+  "startedAt": "2026-05-29T19:49:08.301Z",
+  "baseUrl": "http://localhost:3000",
+  "signupEmail": "chessapp.auth0.probe.1780084148301@example.com",
+  "signupPassword": "ChessApp!84148301Aa1",
+  "navigations": [
+    {
+      "at": "2026-05-29T19:49:09.199Z",
+      "url": "https://dev-ar8epqvzotynb5dx.us.auth0.com/u/signup?state=hKFo2SB0VW5GaGEzTUtHcncxaHgzRGlHN2s3NnhuZDNRMFJ3VqFur3VuaXZlcnNhbC1sb2dpbqN0aWTZIHdpUzdHSUVvM0RndUFRWmx0NjAxVHVNd2JqQ3N1Y0VNo2NpZNkgaFBreWR4eTljUHJFMVU3Vkd6ejh0ZG15eXBzb0NPenk"
+    },
+    {
+      "at": "2026-05-29T19:49:10.890Z",
+      "url": "http://localhost:3000/"
+    },
+    {
+      "at": "2026-05-29T19:49:11.202Z",
+      "url": "http://localhost:3000/"
+    }
+  ],
+  "redirectLikeResponses": [
+    {
+      "at": "2026-05-29T19:49:08.634Z",
+      "status": 307,
+      "url": "http://localhost:3000/auth/login?screen_hint=signup",
+      "location": "https://dev-ar8epqvzotynb5dx.us.auth0.com/authorize?scope=openid+profile+email&screen_hint=signup&client_id=hPkydxy9cPrE1U7VGzz8tdmyypsoCOzy&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fauth%2Fcallback&response_type=code&code_challenge=BsDO2RBmZ-tb4syx8aWqoOxwKwhkTz2tO6q4qayiFwc&code_challenge_method=S256&state=CeQFG3XKQxcifosqTOjsAKcAVQFdPepEcA6giSevtfM&nonce=i7ig2MN1FMqLV3NwqdjO_1xUiFzlUMqlWeHPUwP-BRs"
+    },
+    {
+      "at": "2026-05-29T19:49:09.016Z",
+      "status": 302,
+      "url": "https://dev-ar8epqvzotynb5dx.us.auth0.com/authorize?scope=openid+profile+email&screen_hint=signup&client_id=hPkydxy9cPrE1U7VGzz8tdmyypsoCOzy&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fauth%2Fcallback&response_type=code&code_challenge=BsDO2RBmZ-tb4syx8aWqoOxwKwhkTz2tO6q4qayiFwc&code_challenge_method=S256&state=CeQFG3XKQxcifosqTOjsAKcAVQFdPepEcA6giSevtfM&nonce=i7ig2MN1FMqLV3NwqdjO_1xUiFzlUMqlWeHPUwP-BRs",
+      "location": "/u/signup?state=hKFo2SB0VW5GaGEzTUtHcncxaHgzRGlHN2s3NnhuZDNRMFJ3VqFur3VuaXZlcnNhbC1sb2dpbqN0aWTZIHdpUzdHSUVvM0RndUFRWmx0NjAxVHVNd2JqQ3N1Y0VNo2NpZNkgaFBreWR4eTljUHJFMVU3Vkd6ejh0ZG15eXBzb0NPenk"
+    },
+    {
+      "at": "2026-05-29T19:49:10.144Z",
+      "status": 302,
+      "url": "https://dev-ar8epqvzotynb5dx.us.auth0.com/u/signup?state=hKFo2SB0VW5GaGEzTUtHcncxaHgzRGlHN2s3NnhuZDNRMFJ3VqFur3VuaXZlcnNhbC1sb2dpbqN0aWTZIHdpUzdHSUVvM0RndUFRWmx0NjAxVHVNd2JqQ3N1Y0VNo2NpZNkgaFBreWR4eTljUHJFMVU3Vkd6ejh0ZG15eXBzb0NPenk",
+      "location": "/authorize/resume?state=wiS7GIEo3DguAQZlt601TuMwbjCsucEM"
+    },
+    {
+      "at": "2026-05-29T19:49:10.449Z",
+      "status": 302,
+      "url": "https://dev-ar8epqvzotynb5dx.us.auth0.com/authorize/resume?state=wiS7GIEo3DguAQZlt601TuMwbjCsucEM",
+      "location": "http://localhost:3000/auth/callback?code=Q-G5qDsrknDPca9lCG_mwqUR76VIG368NTgh7XynOJOnE&state=CeQFG3XKQxcifosqTOjsAKcAVQFdPepEcA6giSevtfM"
+    },
+    {
+      "at": "2026-05-29T19:49:10.731Z",
+      "status": 302,
+      "url": "http://localhost:3000/auth/callback?code=Q-G5qDsrknDPca9lCG_mwqUR76VIG368NTgh7XynOJOnE&state=CeQFG3XKQxcifosqTOjsAKcAVQFdPepEcA6giSevtfM",
+      "location": "/"
+    }
+  ],
+  "authResponses": [
+    {
+      "at": "2026-05-29T19:49:08.634Z",
+      "status": 307,
+      "url": "http://localhost:3000/auth/login?screen_hint=signup",
+      "location": "https://dev-ar8epqvzotynb5dx.us.auth0.com/authorize?scope=openid+profile+email&screen_hint=signup&client_id=hPkydxy9cPrE1U7VGzz8tdmyypsoCOzy&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fauth%2Fcallback&response_type=code&code_challenge=BsDO2RBmZ-tb4syx8aWqoOxwKwhkTz2tO6q4qayiFwc&code_challenge_method=S256&state=CeQFG3XKQxcifosqTOjsAKcAVQFdPepEcA6giSevtfM&nonce=i7ig2MN1FMqLV3NwqdjO_1xUiFzlUMqlWeHPUwP-BRs",
+      "hasSetCookie": true
+    },
+    {
+      "at": "2026-05-29T19:49:09.017Z",
+      "status": 302,
+      "url": "https://dev-ar8epqvzotynb5dx.us.auth0.com/authorize?scope=openid+profile+email&screen_hint=signup&client_id=hPkydxy9cPrE1U7VGzz8tdmyypsoCOzy&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fauth%2Fcallback&response_type=code&code_challenge=BsDO2RBmZ-tb4syx8aWqoOxwKwhkTz2tO6q4qayiFwc&code_challenge_method=S256&state=CeQFG3XKQxcifosqTOjsAKcAVQFdPepEcA6giSevtfM&nonce=i7ig2MN1FMqLV3NwqdjO_1xUiFzlUMqlWeHPUwP-BRs",
+      "location": "/u/signup?state=hKFo2SB0VW5GaGEzTUtHcncxaHgzRGlHN2s3NnhuZDNRMFJ3VqFur3VuaXZlcnNhbC1sb2dpbqN0aWTZIHdpUzdHSUVvM0RndUFRWmx0NjAxVHVNd2JqQ3N1Y0VNo2NpZNkgaFBreWR4eTljUHJFMVU3Vkd6ejh0ZG15eXBzb0NPenk",
+      "hasSetCookie": true
+    },
+    {
+      "at": "2026-05-29T19:49:09.195Z",
+      "status": 200,
+      "url": "https://dev-ar8epqvzotynb5dx.us.auth0.com/u/signup?state=hKFo2SB0VW5GaGEzTUtHcncxaHgzRGlHN2s3NnhuZDNRMFJ3VqFur3VuaXZlcnNhbC1sb2dpbqN0aWTZIHdpUzdHSUVvM0RndUFRWmx0NjAxVHVNd2JqQ3N1Y0VNo2NpZNkgaFBreWR4eTljUHJFMVU3Vkd6ejh0ZG15eXBzb0NPenk",
+      "location": null,
+      "hasSetCookie": false
+    },
+    {
+      "at": "2026-05-29T19:49:09.319Z",
+      "status": 200,
+      "url": "https://cdn.auth0.com/ulp/react-components/1.192.0/css/main_wcag_compliant.cdn.min.css",
+      "location": null,
+      "hasSetCookie": false
+    },
+    {
+      "at": "2026-05-29T19:49:09.342Z",
+      "status": 200,
+      "url": "https://cdn.auth0.com/quantum-assets/dist/latest/logos/auth0/auth0-icon-onlight.svg",
+      "location": null,
+      "hasSetCookie": false
+    },
+    {
+      "at": "2026-05-29T19:49:10.144Z",
+      "status": 302,
+      "url": "https://dev-ar8epqvzotynb5dx.us.auth0.com/u/signup?state=hKFo2SB0VW5GaGEzTUtHcncxaHgzRGlHN2s3NnhuZDNRMFJ3VqFur3VuaXZlcnNhbC1sb2dpbqN0aWTZIHdpUzdHSUVvM0RndUFRWmx0NjAxVHVNd2JqQ3N1Y0VNo2NpZNkgaFBreWR4eTljUHJFMVU3Vkd6ejh0ZG15eXBzb0NPenk",
+      "location": "/authorize/resume?state=wiS7GIEo3DguAQZlt601TuMwbjCsucEM",
+      "hasSetCookie": true
+    },
+    {
+      "at": "2026-05-29T19:49:10.449Z",
+      "status": 302,
+      "url": "https://dev-ar8epqvzotynb5dx.us.auth0.com/authorize/resume?state=wiS7GIEo3DguAQZlt601TuMwbjCsucEM",
+      "location": "http://localhost:3000/auth/callback?code=Q-G5qDsrknDPca9lCG_mwqUR76VIG368NTgh7XynOJOnE&state=CeQFG3XKQxcifosqTOjsAKcAVQFdPepEcA6giSevtfM",
+      "hasSetCookie": true
+    },
+    {
+      "at": "2026-05-29T19:49:10.731Z",
+      "status": 302,
+      "url": "http://localhost:3000/auth/callback?code=Q-G5qDsrknDPca9lCG_mwqUR76VIG368NTgh7XynOJOnE&state=CeQFG3XKQxcifosqTOjsAKcAVQFdPepEcA6giSevtfM",
+      "location": "/",
+      "hasSetCookie": true
+    }
+  ],
+  "responses4xx5xx": [],
+  "requestFailures": [],
+  "consoleErrors": [
+    {
+      "at": "2026-05-29T19:49:11.215Z",
+      "type": "warning",
+      "text": "Image with src \"http://localhost:3000/vercel.svg\" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: \"auto\"' or 'height: \"auto\"' to maintain the aspect ratio."
+    }
+  ],
+  "pageErrors": [],
+  "actions": [
+    {
+      "at": "2026-05-29T19:49:09.369Z",
+      "action": "goto_signup"
+    },
+    {
+      "at": "2026-05-29T19:49:09.369Z",
+      "action": "step",
+      "step": 0,
+      "url": "https://dev-ar8epqvzotynb5dx.us.auth0.com/u/signup?state=hKFo2SB0VW5GaGEzTUtHcncxaHgzRGlHN2s3NnhuZDNRMFJ3VqFur3VuaXZlcnNhbC1sb2dpbqN0aWTZIHdpUzdHSUVvM0RndUFRWmx0NjAxVHVNd2JqQ3N1Y0VNo2NpZNkgaFBreWR4eTljUHJFMVU3Vkd6ejh0ZG15eXBzb0NPenk"
+    },
+    {
+      "at": "2026-05-29T19:49:09.444Z",
+      "action": "filled_email",
+      "selector": "input[name=\"email\"]"
+    },
+    {
+      "at": "2026-05-29T19:49:09.469Z",
+      "action": "filled_password",
+      "selector": "input[type=\"password\"]"
+    },
+    {
+      "at": "2026-05-29T19:49:10.891Z",
+      "action": "clicked",
+      "selector": "button[type=\"submit\"]"
+    }
+  ],
+  "final": {
+    "endedAt": "2026-05-29T19:49:45.433Z",
+    "finalUrl": "http://localhost:3000/",
+    "completedReturnToApp": true,
+    "cookieCountAll": 6,
+    "cookieCountApp": 1,
+    "appCookies": [
+      {
+        "name": "__session",
+        "domain": "localhost",
+        "path": "/",
+        "httpOnly": true,
+        "secure": false,
+        "sameSite": "Lax",
+        "expires": 1780170550.982628
+      }
+    ]
+  }
+}

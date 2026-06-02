@@ -1,0 +1,12 @@
+
+> frontend@0.1.0 dev
+> node scripts/next-dev.cjs --port 3015
+
+   ▲ Next.js 16.0.1 (Turbopack)
+   - Local:        http://localhost:3015
+   - Network:      http://192.168.1.139:3015
+   - Environments: .env.local, .env
+
+ ✓ Starting...
+   Suggestion: If you intended to restart next dev, terminate the other process, and then try again.
+[?25h

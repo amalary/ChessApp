@@ -169,6 +169,237 @@ describe('agent chat state', () => {
     expect(referenced?.imageDataUrl).toBe('data:image/jpeg;base64,latest');
   });
 
+  it('prefers the latest image when user asks for latest even if assistant mentions another filename', () => {
+    const referenced = resolveReferencedPuzzle({
+      submissions: [
+        buildSubmission({
+          id: 'older',
+          fileName: 'older-puzzle.png',
+          submittedAt: new Date('2026-05-01T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,older',
+        }),
+        buildSubmission({
+          id: 'latest',
+          fileName: 'latest-puzzle.png',
+          submittedAt: new Date('2026-05-10T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,latest',
+        }),
+      ],
+      userMessage: 'Show my most recent solved puzzle.',
+      assistantMessage: 'I found older-puzzle.png in your history.',
+    });
+
+    expect(referenced?.id).toBe('latest');
+  });
+
+  it('resolves the previous previous puzzle image when explicitly requested', () => {
+    const referenced = resolveReferencedPuzzle({
+      submissions: [
+        buildSubmission({
+          id: 'latest',
+          fileName: 'latest-puzzle.png',
+          submittedAt: new Date('2026-05-10T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,latest',
+        }),
+        buildSubmission({
+          id: 'previous',
+          fileName: 'previous-puzzle.png',
+          submittedAt: new Date('2026-05-09T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,previous',
+        }),
+        buildSubmission({
+          id: 'previous-previous',
+          fileName: 'previous-previous-puzzle.png',
+          submittedAt: new Date('2026-05-08T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,previousprevious',
+        }),
+      ],
+      userMessage: 'Show me the previous previous puzzle image.',
+      assistantMessage: 'Reviewing your puzzle history now.',
+    });
+
+    expect(referenced?.id).toBe('previous-previous');
+    expect(referenced?.imageDataUrl).toBe('data:image/jpeg;base64,previousprevious');
+  });
+
+  it('resolves "the one before that" to the previous previous puzzle image', () => {
+    const referenced = resolveReferencedPuzzle({
+      submissions: [
+        buildSubmission({
+          id: 'latest',
+          submittedAt: new Date('2026-05-10T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,latest',
+        }),
+        buildSubmission({
+          id: 'previous',
+          submittedAt: new Date('2026-05-09T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,previous',
+        }),
+        buildSubmission({
+          id: 'previous-previous',
+          submittedAt: new Date('2026-05-08T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,previousprevious',
+        }),
+      ],
+      userMessage: 'Can you show the one before that puzzle?',
+      assistantMessage: 'Sure.',
+    });
+
+    expect(referenced?.id).toBe('previous-previous');
+  });
+
+  it('resolves "second to last" to the previous puzzle image', () => {
+    const referenced = resolveReferencedPuzzle({
+      submissions: [
+        buildSubmission({
+          id: 'latest',
+          submittedAt: new Date('2026-05-10T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,latest',
+        }),
+        buildSubmission({
+          id: 'previous',
+          submittedAt: new Date('2026-05-09T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,previous',
+        }),
+        buildSubmission({
+          id: 'previous-previous',
+          submittedAt: new Date('2026-05-08T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,previousprevious',
+        }),
+      ],
+      userMessage: 'Can we review the second to last one I solved?',
+      assistantMessage: 'Sure.',
+    });
+
+    expect(referenced?.id).toBe('previous');
+  });
+
+  it('resolves "three solves ago" to the fourth-most-recent puzzle image', () => {
+    const referenced = resolveReferencedPuzzle({
+      submissions: [
+        buildSubmission({
+          id: 'latest',
+          submittedAt: new Date('2026-05-10T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,latest',
+        }),
+        buildSubmission({
+          id: 'previous',
+          submittedAt: new Date('2026-05-09T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,previous',
+        }),
+        buildSubmission({
+          id: 'previous-previous',
+          submittedAt: new Date('2026-05-08T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,previousprevious',
+        }),
+        buildSubmission({
+          id: 'three-ago',
+          submittedAt: new Date('2026-05-07T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,threeago',
+        }),
+      ],
+      userMessage: 'Show me the puzzle from three solves ago.',
+      assistantMessage: 'Got it.',
+    });
+
+    expect(referenced?.id).toBe('three-ago');
+    expect(referenced?.imageDataUrl).toBe('data:image/jpeg;base64,threeago');
+  });
+
+  it('resolves "go back four puzzles" to the fifth-most-recent puzzle image', () => {
+    const referenced = resolveReferencedPuzzle({
+      submissions: [
+        buildSubmission({
+          id: 'latest',
+          submittedAt: new Date('2026-05-10T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,latest',
+        }),
+        buildSubmission({
+          id: 'previous',
+          submittedAt: new Date('2026-05-09T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,previous',
+        }),
+        buildSubmission({
+          id: 'previous-previous',
+          submittedAt: new Date('2026-05-08T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,previousprevious',
+        }),
+        buildSubmission({
+          id: 'three-ago',
+          submittedAt: new Date('2026-05-07T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,threeago',
+        }),
+        buildSubmission({
+          id: 'four-ago',
+          submittedAt: new Date('2026-05-06T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,fourago',
+        }),
+      ],
+      userMessage: 'Go back four puzzles and show me that image.',
+      assistantMessage: 'Sure.',
+    });
+
+    expect(referenced?.id).toBe('four-ago');
+  });
+
+  it('resolves "4th most recent puzzle" to the correct puzzle image', () => {
+    const referenced = resolveReferencedPuzzle({
+      submissions: [
+        buildSubmission({
+          id: 'latest',
+          submittedAt: new Date('2026-05-10T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,latest',
+        }),
+        buildSubmission({
+          id: 'previous',
+          submittedAt: new Date('2026-05-09T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,previous',
+        }),
+        buildSubmission({
+          id: 'previous-previous',
+          submittedAt: new Date('2026-05-08T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,previousprevious',
+        }),
+        buildSubmission({
+          id: 'three-ago',
+          submittedAt: new Date('2026-05-07T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,threeago',
+        }),
+      ],
+      userMessage: 'Show me my 4th most recent puzzle.',
+      assistantMessage: 'Sure.',
+    });
+
+    expect(referenced?.id).toBe('three-ago');
+  });
+
+  it('resolves "submission #3" to the third-most-recent puzzle image', () => {
+    const referenced = resolveReferencedPuzzle({
+      submissions: [
+        buildSubmission({
+          id: 'latest',
+          submittedAt: new Date('2026-05-10T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,latest',
+        }),
+        buildSubmission({
+          id: 'previous',
+          submittedAt: new Date('2026-05-09T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,previous',
+        }),
+        buildSubmission({
+          id: 'submission-three',
+          submittedAt: new Date('2026-05-08T10:00:00Z').toISOString(),
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,submissionthree',
+        }),
+      ],
+      userMessage: 'Show me submission #3 details.',
+      assistantMessage: 'Sure, pulling it now.',
+    });
+
+    expect(referenced?.id).toBe('submission-three');
+    expect(referenced?.imageDataUrl).toBe('data:image/jpeg;base64,submissionthree');
+  });
+
   it('resolves puzzle by filename token match when referenced directly', () => {
     const referenced = resolveReferencedPuzzle({
       submissions: [
@@ -188,6 +419,32 @@ describe('agent chat state', () => {
     });
 
     expect(referenced?.id).toBe('fork-study');
+  });
+
+  it('aligns referenced image to the assistant solution line when available', () => {
+    const referenced = resolveReferencedPuzzle({
+      submissions: [
+        buildSubmission({
+          id: 'latest-generic',
+          fileName: 'latest-generic.png',
+          submittedAt: new Date('2026-05-10T10:00:00Z').toISOString(),
+          solutionLines: ['1. Qh8+ Kxh8 2. Rd8#'],
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,latest',
+        }),
+        buildSubmission({
+          id: 'older-matching-line',
+          fileName: 'older-matching-line.png',
+          submittedAt: new Date('2026-05-09T10:00:00Z').toISOString(),
+          solutionLines: ['1. Nf7+ Kg8 2. Nh6#'],
+          originalPuzzleImageDataUrl: 'data:image/jpeg;base64,oldermatch',
+        }),
+      ],
+      userMessage: 'Explain my latest puzzle.',
+      assistantMessage: 'Best move is Nf7+ and the line continues Kg8 Nh6#.',
+    });
+
+    expect(referenced?.id).toBe('older-matching-line');
+    expect(referenced?.imageDataUrl).toBe('data:image/jpeg;base64,oldermatch');
   });
 
   it('returns null when message is not puzzle-related', () => {
