@@ -47,7 +47,7 @@ FAILED_SOLVE_LIMIT = 5
 FAILED_SOLVE_WINDOW_SECONDS = 10 * 60
 FAILED_SOLVE_BLOCK_SECONDS = 15 * 60
 
-ENGINE_LOCK_TTL_SECONDS = 8
+ENGINE_LOCK_TTL_SECONDS = 45
 MAX_SOLVE_IMAGE_BYTES = 10 * 1024 * 1024
 ALLOWED_SOLVE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 SOLVE_IP_LIMIT = 20
@@ -96,7 +96,7 @@ def _env_int(name: str, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
-def _trusted_proxy_networks() -> list[ipaddress._BaseNetwork]:
+def _trusted_proxy_networks() -> list:
     configured = os.getenv("TRUSTED_PROXY_CIDRS", _TRUSTED_PROXY_CIDRS_DEFAULT)
     networks: list[ipaddress._BaseNetwork] = []
     for chunk in configured.split(","):

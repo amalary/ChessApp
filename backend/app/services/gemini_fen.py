@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from io import BytesIO
 from typing import Any, Dict, Iterable
 
@@ -228,11 +229,16 @@ def _call_gemini_structured(
     if correction_message:
         user_parts.append({"text": correction_message})
 
+    request_timeout_s = max(1.0, _env_float("GEMINI_REQUEST_TIMEOUT_SECONDS", 20.0))
+    max_model_fallbacks = max(1, _env_int("GEMINI_MODEL_FALLBACK_LIMIT", 2))
     resp = None
     last_model_error: Exception | None = None
-    for model_name in _model_candidates():
+    for model_name in _model_candidates()[:max_model_fallbacks]:
+        pool = ThreadPoolExecutor(max_workers=1)
+        future = None
         try:
-            resp = client.models.generate_content(
+            future = pool.submit(
+                client.models.generate_content,
                 model=model_name,
                 contents=[{"role": "user", "parts": user_parts}],
                 config={
@@ -241,13 +247,22 @@ def _call_gemini_structured(
                     "temperature": 0,
                 },
             )
+            resp = future.result(timeout=request_timeout_s)
             break
+        except FutureTimeoutError as exc:
+            if future is not None:
+                future.cancel()
+            raise TimeoutError(
+                f"Gemini request timed out after {request_timeout_s:.1f}s."
+            ) from exc
         except Exception as exc:
             message = str(exc)
             if "NOT_FOUND" in message or "no longer available" in message.lower():
                 last_model_error = exc
                 continue
             raise
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
 
     if resp is None:
         if last_model_error is not None:
@@ -331,6 +346,7 @@ def fen_from_image_bytes(
     )
     min_attempts = max(1, _env_int("GEMINI_MIN_ATTEMPTS", 3))
     max_attempts = max(1, _env_int("GEMINI_TRANSCRIBE_ATTEMPTS", attempts))
+    max_attempts = min(max_attempts, max(1, _env_int("GEMINI_MAX_ATTEMPTS_HARD_CAP", 5)))
     consensus_exit_votes = max(2, _env_int("GEMINI_CONSENSUS_EXIT_VOTES", 3))
 
     for idx in range(max_attempts):
