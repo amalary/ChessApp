@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session
 
 from app.auth0 import get_optional_current_user
 from app.db_auth import get_db
-from app.local_auth_user import get_optional_local_auth_user
+from app.local_auth_user import (
+    get_optional_local_auth_user,
+    get_optional_local_auth_user_from_current_user,
+)
 from app.models_auth import LocalAuthUser
 from app.services.chess_agent import assistant_agent
 from app.services.puzzle_submission_service import (
@@ -116,9 +119,11 @@ async def assistant(
         payload.client_puzzle_history
     )
     user_profile_context: dict | None = None
-    if current_user is None and local_auth_user is None:
-        raise HTTPException(status_code=401, detail="Authentication is required.")
-
+    if local_auth_user is None:
+        local_auth_user = get_optional_local_auth_user_from_current_user(
+            current_user=current_user,
+            db=db,
+        )
     if local_auth_user is not None:
         try:
             history_context = build_submission_history_context_for_user(
@@ -130,6 +135,15 @@ async def assistant(
             logger.warning("assistant history lookup failed: %s", exc)
             history_context = None
 
+        user_profile_context = build_agent_user_profile_context(
+            local_auth_user=local_auth_user,
+            auth_profile=current_user,
+        )
+    elif current_user is not None:
+        user_profile_context = build_agent_user_profile_context(
+            auth_profile=current_user,
+        )
+
     merged_history_context: list[dict] | None = None
     if history_context and client_history_context:
         merged_history_context = _normalize_client_history_context(
@@ -140,18 +154,14 @@ async def assistant(
     elif client_history_context:
         merged_history_context = client_history_context
 
-    user_profile_context = build_agent_user_profile_context(
-        local_auth_user=local_auth_user,
-        auth_profile=current_user,
-    )
-
     user_id = ""
-    if isinstance(current_user, dict):
-        candidate_sub = current_user.get("sub")
-        if isinstance(candidate_sub, str):
-            user_id = candidate_sub
+    candidate_sub = current_user.get("sub") if current_user is not None else None
+    if isinstance(candidate_sub, str):
+        user_id = candidate_sub
     if not user_id and local_auth_user is not None:
         user_id = str(local_auth_user.id)
+    if not user_id:
+        user_id = "anonymous"
 
     result = assistant_agent.run(
         user_id=user_id,

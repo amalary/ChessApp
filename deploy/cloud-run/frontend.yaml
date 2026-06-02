@@ -1,0 +1,54 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: chessapp-frontend
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: "10"
+    spec:
+      serviceAccountName: chessapp-frontend-sa@PROJECT_ID.iam.gserviceaccount.com
+      containerConcurrency: 80
+      timeoutSeconds: 30
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/chessapp/frontend:latest
+          ports:
+            - name: http1
+              containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: APP_BASE_URL
+              value: https://FRONTEND_DOMAIN
+            - name: BACKEND_URL
+              value: https://BACKEND_DOMAIN
+            - name: NEXT_PUBLIC_BACKEND_URL
+              value: https://BACKEND_DOMAIN
+            - name: AUTH0_DOMAIN
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-auth0-domain
+                  key: latest
+            - name: AUTH0_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-auth0-client-id
+                  key: latest
+            - name: AUTH0_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-auth0-client-secret
+                  key: latest
+            - name: AUTH0_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-auth0-secret
+                  key: latest
+            - name: AUTH0_AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-auth0-audience
+                  key: latest

@@ -1,6 +1,8 @@
 import type { AssistantConversationMode } from '@/lib/assistant-conversation-mode';
 import { getRequestAuthContextClient } from 'lib/getRequestAuthContextClient';
 
+import { readResponsePayload, responseErrorMessage } from '@/lib/http-response';
+
 export type AgentChatResponse = {
   query: string;
   answer: string;
@@ -60,25 +62,6 @@ function parseAgentChatResponse(payload: unknown): AgentChatResponse {
   };
 }
 
-function parseErrorMessage(payload: AgentChatErrorPayload, fallback: string): string {
-  if (payload.error && typeof payload.error.message === 'string' && payload.error.message.trim()) {
-    return payload.error.message.trim();
-  }
-
-  if (payload.detail && typeof payload.detail === 'string' && payload.detail.trim()) {
-    return payload.detail.trim();
-  }
-
-  if (payload.detail && typeof payload.detail === 'object') {
-    const detailRecord = payload.detail as Record<string, unknown>;
-    if (typeof detailRecord.message === 'string' && detailRecord.message.trim()) {
-      return detailRecord.message.trim();
-    }
-  }
-
-  return fallback;
-}
-
 export async function requestAgentChat({
   query,
   limit = 5,
@@ -124,16 +107,15 @@ export async function requestAgentChat({
     throw new Error(networkMessage);
   }
 
-  let payload: unknown = null;
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
-  }
+  const { payload, text } = await readResponsePayload(response);
 
   if (!response.ok) {
     const fallbackMessage = `Assistant request failed (${response.status}).`;
-    const message = parseErrorMessage((payload ?? {}) as AgentChatErrorPayload, fallbackMessage);
+    const message = responseErrorMessage(
+      (payload ?? {}) as AgentChatErrorPayload,
+      fallbackMessage,
+      text,
+    );
     throw new Error(message);
   }
 

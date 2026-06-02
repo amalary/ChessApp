@@ -1,9 +1,12 @@
 import os
 from functools import lru_cache
+from uuid import UUID
 
 import jwt
 from fastapi import HTTPException, Request, status
 from jwt import InvalidTokenError, PyJWKClient
+
+from app.local_auth_session import verify_local_auth_session_token
 
 
 def _require_env(name: str) -> str:
@@ -32,6 +35,34 @@ def _extract_bearer_token(request: Request) -> str | None:
     return token.strip()
 
 
+def _extract_local_auth_user(request: Request) -> dict | None:
+    raw_user_id = request.headers.get("X-Local-Auth-User-Id", "").strip()
+    session_token = request.headers.get("X-Local-Auth-Session", "").strip()
+    if not raw_user_id and not session_token:
+        return None
+    if not raw_user_id or not session_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="X-Local-Auth-User-Id and X-Local-Auth-Session are both required.",
+        )
+    try:
+        user_id = UUID(raw_user_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid X-Local-Auth-User-Id header.",
+        ) from exc
+    if not verify_local_auth_session_token(session_token, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid local auth session.",
+        )
+    return {
+        "sub": f"local|{user_id}",
+        "local_auth_user_id": str(user_id),
+    }
+
+
 def _decode_token(token: str) -> dict:
     audience = _require_env("AUTH0_AUDIENCE")
     issuer_domain = _require_env("AUTH0_DOMAIN").strip().rstrip("/")
@@ -56,6 +87,9 @@ def _decode_token(token: str) -> dict:
 
 def get_current_user(request: Request) -> dict:
     try:
+        local_user = _extract_local_auth_user(request)
+        if local_user is not None:
+            return local_user
         token = _extract_bearer_token(request)
         if not token:
             raise HTTPException(
@@ -91,6 +125,12 @@ def get_current_user(request: Request) -> dict:
 
 
 def get_optional_current_user(request: Request) -> dict | None:
+    try:
+        local_user = _extract_local_auth_user(request)
+    except HTTPException:
+        return None
+    if local_user is not None:
+        return local_user
     token = _extract_bearer_token(request)
     if not token:
         return None

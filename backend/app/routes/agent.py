@@ -9,9 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth0 import get_optional_current_user
+from app.auth0 import get_current_user, get_optional_current_user
 from app.db_auth import get_db
-from app.local_auth_user import get_optional_local_auth_user
+from app.local_auth_user import (
+    get_optional_local_auth_user,
+    get_optional_local_auth_user_from_current_user,
+)
 from app.models_auth import LocalAuthUser
 from app.services.agent_chat import (
     AgentDatabaseError,
@@ -198,15 +201,9 @@ def _normalize_query_or_raise(query: str) -> str:
 @router.post("/retrieve", response_model=RetrievalResponse)
 async def retrieve(
     request: RetrievalRequest,
-    current_user: dict | None = Depends(get_optional_current_user),
-    local_auth_user: LocalAuthUser | None = Depends(get_optional_local_auth_user),
+    current_user: dict = Depends(get_current_user),
 ) -> RetrievalResponse:
     try:
-        if current_user is None and local_auth_user is None:
-            raise HTTPException(
-                status_code=401,
-                detail={"code": "auth_required", "message": "Authentication is required."},
-            )
         clean_query = _normalize_query_or_raise(request.query)
         logger.info("agent_retrieve query_len=%d", len(clean_query))
         results = retrieve_chunks(clean_query, request.limit)
@@ -247,16 +244,16 @@ async def chat(
 ) -> ChatResponse:
     try:
         clean_query = _normalize_query_or_raise(request.query)
-        if current_user is None and local_auth_user is None:
-            raise HTTPException(
-                status_code=401,
-                detail={"code": "auth_required", "message": "Authentication is required."},
-            )
         history_context: list[dict] | None = None
         client_history_context = _normalize_client_history_context(
             request.client_puzzle_history
         )
         user_profile_context: dict | None = None
+        if local_auth_user is None:
+            local_auth_user = get_optional_local_auth_user_from_current_user(
+                current_user=current_user,
+                db=db,
+            )
         if local_auth_user is not None:
             try:
                 history_context = build_submission_history_context_for_user(
@@ -273,7 +270,7 @@ async def chat(
             )
         elif current_user is not None:
             user_profile_context = build_agent_user_profile_context(
-                auth_profile=current_user
+                auth_profile=current_user,
             )
 
         merged_history_context: list[dict] | None = None

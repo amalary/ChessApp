@@ -20,9 +20,6 @@ type LocalAuthSuccessPayload = {
   message?: unknown;
   user?: unknown;
   local_session_token?: unknown;
-  localSessionToken?: unknown;
-  session_token?: unknown;
-  sessionToken?: unknown;
   detail?: unknown;
   error?: {
     code?: unknown;
@@ -84,16 +81,10 @@ function parseLocalAuthUser(payload: LocalAuthSuccessPayload): LocalAuthUser | n
   const username =
     typeof candidate.username === "string" ? candidate.username.trim() : "";
   const email = typeof candidate.email === "string" ? candidate.email.trim() : "";
-
-  const tokenCandidates = [
-    payload.local_session_token,
-    payload.localSessionToken,
-    payload.session_token,
-    payload.sessionToken,
-  ];
-  const sessionToken = tokenCandidates.find(
-    (value): value is string => typeof value === "string" && value.trim().length > 0,
-  )?.trim();
+  const sessionToken =
+    typeof payload.local_session_token === "string"
+      ? payload.local_session_token.trim()
+      : "";
 
   if (!id || !username || !email || !sessionToken) {
     return null;
@@ -116,7 +107,7 @@ function LoginTestPageContent() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const callbackErrorDescription = searchParams?.get("auth_error_description");
+  const callbackError = searchParams?.get("auth_error");
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -315,9 +306,9 @@ function LoginTestPageContent() {
             </p>
           )}
 
-          {callbackErrorDescription && !errorMessage && (
+          {callbackError && !errorMessage && (
             <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-              {callbackErrorDescription}
+              Authentication callback failed. Please try signing in again.
             </p>
           )}
 

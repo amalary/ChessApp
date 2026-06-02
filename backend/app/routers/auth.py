@@ -1,5 +1,6 @@
 from datetime import datetime
 import json
+import logging
 import os
 import re
 from urllib import error as urllib_error
@@ -8,18 +9,19 @@ from urllib import request as urllib_request
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-import jwt
 from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db_auth import get_db
+from app.db_auth import get_auth_db_runtime_status
 from app.local_auth_session import issue_local_auth_session_token
 from app.models_auth import LocalAuthUser
 from app.security import hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 SIGNUP_DB_UNAVAILABLE_DETAIL = (
     "Database unavailable for signup. Verify DB_USER/DB_PASSWORD/DB_NAME "
@@ -163,8 +165,35 @@ def _is_grant_allowed_by_env(grant_name: str) -> bool | None:
     return grant_name in grants
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_production_env() -> bool:
+    app_env = os.environ.get("APP_ENV", os.environ.get("ENVIRONMENT", "development"))
+    return app_env.strip().lower() in {"production", "prod"}
+
+
+def _allow_auth_debug_config() -> bool:
+    return _env_bool("ALLOW_AUTH_DEBUG_CONFIG", False)
+
+
+def _allow_local_auth_fallback() -> bool:
+    return _env_bool("ALLOW_LOCAL_AUTH_FALLBACK", not _is_production_env())
+
+
+def _sync_local_auth_with_auth0() -> bool:
+    return _env_bool("SYNC_LOCAL_AUTH_WITH_AUTH0", _is_production_env())
+
+
 @router.get("/debug-config")
 def auth_debug_config():
+    if not _allow_auth_debug_config():
+        raise HTTPException(status_code=404, detail="Not found.")
+
     config = _auth0_config()
     if config is None:
         return {
@@ -200,6 +229,17 @@ def auth_debug_config():
     }
 
 
+@router.get("/debug-db")
+def auth_debug_db():
+    if not _allow_auth_debug_config():
+        raise HTTPException(status_code=404, detail="Not found.")
+
+    return {
+        "ok": True,
+        "database": get_auth_db_runtime_status(),
+    }
+
+
 def _json_from_bytes(raw: bytes) -> dict:
     try:
         parsed = json.loads(raw.decode("utf-8"))
@@ -208,20 +248,20 @@ def _json_from_bytes(raw: bytes) -> dict:
         return {}
 
 
-def _auth0_decode_id_token(id_token: str | None) -> dict:
-    if not id_token:
+def _auth0_fetch_userinfo(access_token: str | None, domain: str) -> dict:
+    if not access_token:
         return {}
     try:
-        payload = jwt.decode(
-            id_token,
-            options={
-                "verify_signature": False,
-                "verify_aud": False,
-                "verify_iss": False,
-                "verify_exp": False,
-            },
+        request = urllib_request.Request(
+            url=f"{domain}/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+            method="GET",
         )
-        return payload if isinstance(payload, dict) else {}
+        with urllib_request.urlopen(
+            request, timeout=AUTH0_REQUEST_TIMEOUT_SECONDS
+        ) as response:
+            payload = _json_from_bytes(response.read())
+            return payload if isinstance(payload, dict) else {}
     except Exception:
         return {}
 
@@ -341,7 +381,7 @@ def _auth0_verify_login(identifier: str, password: str) -> dict:
             detail=AUTH0_UPSTREAM_UNAVAILABLE_DETAIL,
         ) from exc
 
-    claims = _auth0_decode_id_token(payload.get("id_token"))
+    claims = _auth0_fetch_userinfo(payload.get("access_token"), config["domain"])
     if not claims:
         claims = {}
     return claims
@@ -491,12 +531,32 @@ def _looks_like_email(value: str) -> bool:
     return bool(EMAIL_LIKE_PATTERN.fullmatch(value.strip()))
 
 
+def _extract_auth0_sub_or_raise(auth0_claims: dict) -> str:
+    subject = auth0_claims.get("sub")
+    if not isinstance(subject, str) or not subject.strip():
+        raise HTTPException(
+            status_code=401,
+            detail="Auth0 response did not include a valid subject.",
+        )
+    return subject.strip()
+
+
 def _sync_local_user_after_auth0_login(
     db: Session, payload: LoginRequest, auth0_claims: dict
 ) -> LocalAuthUser:
+    auth0_sub = _extract_auth0_sub_or_raise(auth0_claims)
     user = _find_user_for_login(db, payload)
     if user is not None:
+        existing_for_sub = db.execute(
+            select(LocalAuthUser).where(LocalAuthUser.auth0_sub == auth0_sub)
+        ).scalar_one_or_none()
+        if existing_for_sub is not None and existing_for_sub.id != user.id:
+            raise HTTPException(
+                status_code=409,
+                detail="Auth0 identity is already linked to another account.",
+            )
         # Keep local password hash aligned so DB-backed flows remain consistent.
+        user.auth0_sub = auth0_sub
         user.password_hash = hash_password(payload.password)
         db.add(user)
         db.commit()
@@ -524,6 +584,7 @@ def _sync_local_user_after_auth0_login(
     )
 
     new_user = LocalAuthUser(
+        auth0_sub=auth0_sub,
         username=username,
         email=resolved_email,
         password_hash=hash_password(payload.password),
@@ -557,7 +618,8 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
                 status_code=409, detail="Username or email is already registered."
             )
 
-        _auth0_signup(payload)
+        if _sync_local_auth_with_auth0():
+            _auth0_signup(payload)
 
         new_user = LocalAuthUser(
             username=payload.username,
@@ -575,7 +637,8 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
         )
     except HTTPException:
         raise
-    except SQLAlchemyError:
+    except SQLAlchemyError as exc:
+        logger.exception("Signup database operation failed: %s", exc)
         _raise_db_unavailable(SIGNUP_DB_UNAVAILABLE_DETAIL)
 
 
@@ -584,69 +647,52 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     try:
         identifier = (payload.identifier or "").strip()
         local_user = _find_user_for_login(db, payload)
-        auth0_claims: dict
-        try:
-            auth0_claims = _auth0_verify_login(
-                identifier=identifier,
-                password=payload.password,
-            )
-        except HTTPException as exc:
-            # If a user types username instead of email, retry Auth0 against
-            # local user's email to support a regular username/email login UX.
-            if exc.status_code == 401 and not _looks_like_email(identifier):
-                retry_email = (
-                    local_user.email.strip()
-                    if local_user is not None and isinstance(local_user.email, str)
-                    else ""
-                )
-                if retry_email and retry_email.lower() != identifier.lower():
-                    auth0_claims = _auth0_verify_login(
-                        identifier=retry_email,
-                        password=payload.password,
-                    )
-                else:
-                    # Local fallback path: existing DB user with valid password
-                    # can be synced into Auth0 so legacy users are not locked out.
-                    if local_user is None or not verify_password(
-                        payload.password, local_user.password_hash
-                    ):
-                        raise
+        auth0_claims: dict | None = None
+        local_fallback_enabled = _allow_local_auth_fallback()
 
-                    try:
-                        _auth0_signup(
-                            SignupRequest(
-                                username=local_user.username,
-                                email=local_user.email,
+        if _sync_local_auth_with_auth0():
+            try:
+                auth0_claims = _auth0_verify_login(
+                    identifier=identifier,
+                    password=payload.password,
+                )
+            except HTTPException as exc:
+                # If a user types username instead of email, retry Auth0 against
+                # local user's email to support a regular username/email login UX.
+                if exc.status_code == 401 and not _looks_like_email(identifier):
+                    retry_email = (
+                        local_user.email.strip()
+                        if local_user is not None and isinstance(local_user.email, str)
+                        else ""
+                    )
+                    if retry_email and retry_email.lower() != identifier.lower():
+                        try:
+                            auth0_claims = _auth0_verify_login(
+                                identifier=retry_email,
                                 password=payload.password,
                             )
-                        )
-                    except HTTPException as sync_exc:
-                        # "already exists" means account is present in Auth0.
-                        # Any other Auth0 sync error should not block a known-good
-                        # local login credential.
-                        if sync_exc.status_code == 409:
-                            pass
-
-                    try:
-                        auth0_claims = _auth0_verify_login(
-                            identifier=local_user.email,
-                            password=payload.password,
-                        )
-                    except HTTPException:
-                        auth0_claims = {}
-            else:
-                if local_user is None or not verify_password(
-                    payload.password, local_user.password_hash
-                ):
+                        except HTTPException as retry_exc:
+                            if not local_fallback_enabled:
+                                raise retry_exc
+                            auth0_claims = None
+                    elif not local_fallback_enabled:
+                        raise
+                    else:
+                        auth0_claims = None
+                elif not local_fallback_enabled:
                     raise
-                auth0_claims = {}
+                else:
+                    auth0_claims = None
 
         if auth0_claims:
             user = _sync_local_user_after_auth0_login(db, payload, auth0_claims)
         else:
-            # Local credentials verified; keep UX moving while Auth0 account
-            # converges in background retries.
-            if local_user is None:
+            # Optional local fallback for dev/recovery flows only.
+            if not local_fallback_enabled:
+                raise HTTPException(status_code=401, detail="Invalid username or password.")
+            if local_user is None or not verify_password(
+                payload.password, local_user.password_hash
+            ):
                 raise HTTPException(status_code=401, detail="Invalid username or password.")
             user = _finalize_existing_local_login(db, local_user, payload.password)
 
@@ -657,5 +703,6 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         )
     except HTTPException:
         raise
-    except SQLAlchemyError:
+    except SQLAlchemyError as exc:
+        logger.exception("Login database operation failed: %s", exc)
         _raise_db_unavailable(LOGIN_DB_UNAVAILABLE_DETAIL)

@@ -97,18 +97,31 @@ function RecentPuzzleContextCard({ submissions = [] }: { submissions?: PuzzleSub
         : 'First move missed'
       : 'No first-move sample';
 
-    return [
-      submission.fileName || 'Uploaded puzzle',
-      inferMotifFromSubmission(submission),
-      formatRelativeSubmissionTime(submission.submittedAt),
-      accuracyLabel,
-    ] as const;
+    return {
+      key: submission.id,
+      title: submission.fileName || 'Uploaded puzzle',
+      theme: inferMotifFromSubmission(submission),
+      solvedAt: formatRelativeSubmissionTime(submission.submittedAt),
+      accuracy: accuracyLabel,
+    };
   });
 
   const fallbackRows = [
-    ['Waiting for puzzle history', 'Theme pending', 'Solve a puzzle', 'Profile building'],
-    ['Adaptive context', 'Motifs loading', 'From your submissions', 'Personalized in real-time'],
-  ] as const;
+    {
+      key: 'fallback-waiting',
+      title: 'Waiting for puzzle history',
+      theme: 'Theme pending',
+      solvedAt: 'Solve a puzzle',
+      accuracy: 'Profile building',
+    },
+    {
+      key: 'fallback-adaptive',
+      title: 'Adaptive context',
+      theme: 'Motifs loading',
+      solvedAt: 'From your submissions',
+      accuracy: 'Personalized in real-time',
+    },
+  ];
 
   const displayRows = rows.length > 0 ? rows : fallbackRows;
 
@@ -116,9 +129,9 @@ function RecentPuzzleContextCard({ submissions = [] }: { submissions?: PuzzleSub
     <article className="rounded-3xl border border-slate-200/80 bg-white/68 p-4 backdrop-blur-xl dark:border-slate-500/90 dark:bg-slate-950/84">
       <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Recent Puzzle Context</h3>
       <div className="mt-3 space-y-2.5">
-        {displayRows.map(([title, theme, solvedAt, accuracy]) => (
+        {displayRows.map(({ key, title, theme, solvedAt, accuracy }) => (
           <div
-            key={`${title}-${theme}-${solvedAt}`}
+            key={key}
             className="rounded-2xl border border-slate-200/80 bg-white/88 px-3 py-2.5 dark:border-slate-500/80 dark:bg-slate-900/84"
           >
             <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">{title}</p>

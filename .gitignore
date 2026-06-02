@@ -10,6 +10,8 @@ backend/sa.json
 backend/keys/
 backend/tools/
 **/__pycache__/
+backend/.pytest_cache/
+backend/.pytest_tmp/
 GOOGLE_APPLICATION_CREDENTIALS=/app/keys/sa.json
 GCS_BUCKET=your-bucket-name-here
 GCP_PROJECT_ID=chessapp-477519

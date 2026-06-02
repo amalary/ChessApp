@@ -9,7 +9,6 @@ export type RequestAuthContext = {
   headers: HeadersInit;
   token: string | null;
   localAuthUserId: string | null;
-  localAuthSessionToken: string | null;
   hasAnyAuth: boolean;
 };
 
@@ -28,19 +27,18 @@ export async function getRequestAuthContextClient(
 
   const activeLocalAuthUser = readActiveLocalAuthUser();
   const localAuthUserId = activeLocalAuthUser?.id ?? null;
-  const localAuthSessionToken = activeLocalAuthUser?.sessionToken ?? null;
+  const localAuthSession = activeLocalAuthUser?.sessionToken ?? null;
   if (localAuthUserId) {
     headers["X-Local-Auth-User-Id"] = localAuthUserId;
   }
-  if (localAuthSessionToken) {
-    headers["X-Local-Auth-Session"] = localAuthSessionToken;
+  if (localAuthSession) {
+    headers["X-Local-Auth-Session"] = localAuthSession;
   }
 
   return {
     headers,
     token,
     localAuthUserId,
-    localAuthSessionToken,
-    hasAnyAuth: Boolean(token || (localAuthUserId && localAuthSessionToken)),
+    hasAnyAuth: Boolean(token || (localAuthUserId && localAuthSession)),
   };
 }

@@ -281,6 +281,7 @@ def _pick_consensus_fen(
     candidates: Iterable[dict[str, Any]],
     expected_side: str | None = None,
     attempts_used: int | None = None,
+    include_raw_output: bool = False,
 ) -> dict[str, Any]:
     rows = list(candidates)
     if not rows:
@@ -313,13 +314,15 @@ def _pick_consensus_fen(
         if isinstance(raw, str) and raw.strip():
             selected_raw_output = raw
             break
-    return {
+    result = {
         "fen": best_fen,
         "confidence": round(avg_conf, 4),
         "side_to_move": "white" if best_rows[0]["side"] == "w" else "black",
         "attempts_used": attempts_used if attempts_used is not None else len(rows),
-        "raw_output": selected_raw_output,
     }
+    if include_raw_output:
+        result["raw_output"] = selected_raw_output
+    return result
 
 
 def fen_from_image_bytes(
@@ -327,6 +330,7 @@ def fen_from_image_bytes(
     filename: str | None = None,
     expected_side_to_move: str | None = None,
     attempts: int = 3,
+    include_raw_output: bool = False,
 ) -> Dict[str, Any]:
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -412,13 +416,15 @@ def fen_from_image_bytes(
                 and fen_avg_conf >= early_exit_confidence
                 and side_matches_expected
             ):
-                return {
+                result: dict[str, Any] = {
                     "fen": fen,
                     "confidence": round(fen_avg_conf, 4),
                     "side_to_move": "white" if side == "w" else "black",
                     "attempts_used": idx + 1,
-                    "raw_output": raw_output,
                 }
+                if include_raw_output:
+                    result["raw_output"] = raw_output
+                return result
             correction_message = (
                 "Double-check every occupied square and ensure board_map is exact."
             )
@@ -438,9 +444,11 @@ def fen_from_image_bytes(
             valid_only,
             expected_side=expected,
             attempts_used=max_attempts,
+            include_raw_output=include_raw_output,
         )
     return _pick_consensus_fen(
         all_candidates if all_candidates else valid_candidates,
         expected_side=expected,
         attempts_used=max_attempts,
+        include_raw_output=include_raw_output,
     )

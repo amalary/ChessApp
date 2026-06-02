@@ -31,9 +31,7 @@ export function AuthNav() {
   }, []);
 
   const hasAuth0Session = Boolean(user?.sub);
-  const hasLocalAuthSession = Boolean(
-    localAuthUser?.id && localAuthUser?.sessionToken,
-  );
+  const hasLocalAuthSession = Boolean(localAuthUser?.id);
   const isAuthenticated = hasAuth0Session || hasLocalAuthSession;
   const displayName =
     user?.name ??
@@ -48,6 +46,7 @@ export function AuthNav() {
 
   const handleLogout = (event: MouseEvent<HTMLAnchorElement>) => {
     writeActiveLocalAuthUser(null);
+    void fetch("/api/local-auth/logout", { method: "POST", credentials: "same-origin" });
 
     if (!hasAuth0Session) {
       event.preventDefault();

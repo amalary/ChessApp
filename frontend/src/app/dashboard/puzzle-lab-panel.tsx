@@ -26,6 +26,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { getRequestAuthContextClient } from 'lib/getRequestAuthContextClient';
+import { readResponsePayload, responseErrorMessage } from '@/lib/http-response';
 import {
   addPuzzleSubmission,
   estimatePuzzleElo,
@@ -1342,14 +1343,15 @@ export function PuzzleLabPanel({
         body: formData,
       });
 
-      const solveData = (await solveResponse.json()) as SolveResponse;
+      const { payload: solvePayload, text: solveText } =
+        await readResponsePayload<SolveResponse>(solveResponse);
+      const solveData = solvePayload ?? {};
       if (!solveResponse.ok) {
-        const detailText =
-          typeof solveData.detail === 'string'
-            ? solveData.detail
-            : typeof solveData.error === 'string'
-              ? solveData.error
-              : `Solve failed (${solveResponse.status})`;
+        const detailText = responseErrorMessage(
+          solveData,
+          `Solve failed (${solveResponse.status})`,
+          solveText,
+        );
         throw new Error(detailText);
       }
 
@@ -1402,7 +1404,9 @@ export function PuzzleLabPanel({
             body: JSON.stringify(assistantPayload),
           });
 
-          const assistantData = (await assistantResponse.json()) as AssistantApiResponse;
+          const { payload: parsedAssistantPayload } =
+            await readResponsePayload<AssistantApiResponse>(assistantResponse);
+          const assistantData = parsedAssistantPayload ?? {};
           if (assistantResponse.ok) {
             if (typeof assistantData.response_text === 'string' && assistantData.response_text.trim()) {
               explanationText = assistantData.response_text.trim();
@@ -1493,7 +1497,9 @@ export function PuzzleLabPanel({
       }
     } catch (submissionError: unknown) {
       const message =
-        submissionError instanceof Error && submissionError.message
+        submissionError instanceof TypeError && submissionError.message.toLowerCase().includes('fetch')
+          ? `Cannot reach solver backend at ${backendUrl}. Start backend and verify ${backendUrl}/health returns {"status":"ok"}.`
+          : submissionError instanceof Error && submissionError.message
           ? submissionError.message
           : 'Puzzle analysis failed.';
       setError(message);
@@ -1737,9 +1743,10 @@ export function PuzzleLabPanel({
         body: JSON.stringify(payload),
       });
 
-      const data = (await response.json()) as AssistantApiResponse;
+      const { payload: hintPayload, text } = await readResponsePayload<AssistantApiResponse>(response);
+      const data = hintPayload ?? {};
       if (!response.ok) {
-        throw new Error(typeof data.detail === 'string' ? data.detail : `Hint request failed (${response.status})`);
+        throw new Error(responseErrorMessage(data, `Hint request failed (${response.status})`, text));
       }
 
       if (typeof data.response_text === 'string' && data.response_text.trim()) {

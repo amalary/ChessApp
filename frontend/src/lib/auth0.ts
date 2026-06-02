@@ -94,7 +94,6 @@ export const auth0 = new Auth0Client({
     if (error) {
       const url = new URL('/login-test', appBaseUrl);
       url.searchParams.set('auth_error', 'callback_failed');
-      url.searchParams.set('auth_error_description', error.message);
       return NextResponse.redirect(url, 302);
     }
 

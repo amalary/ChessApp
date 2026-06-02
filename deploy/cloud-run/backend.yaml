@@ -1,0 +1,80 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: chessapp-backend
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cloudsql-instances: PROJECT_ID:REGION:CLOUD_SQL_INSTANCE
+    spec:
+      serviceAccountName: chessapp-backend-sa@PROJECT_ID.iam.gserviceaccount.com
+      containerConcurrency: 20
+      timeoutSeconds: 60
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/chessapp/backend:latest
+          ports:
+            - name: http1
+              containerPort: 8080
+          env:
+            - name: APP_ENV
+              value: production
+            - name: CORS_ALLOWED_ORIGINS
+              value: https://FRONTEND_DOMAIN
+            - name: ALLOW_AUTH_DEBUG_CONFIG
+              value: "true"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-db-user
+                  key: latest
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-db-password
+                  key: latest
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-db-name
+                  key: latest
+            - name: CLOUD_SQL_CONNECTION_NAME
+              value: PROJECT_ID:REGION:CLOUD_SQL_INSTANCE
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-google-api-key
+                  key: latest
+            - name: AUTH0_DOMAIN
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-auth0-domain
+                  key: latest
+            - name: AUTH0_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-auth0-client-id
+                  key: latest
+            - name: AUTH0_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-auth0-client-secret
+                  key: latest
+            - name: AUTH0_AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-auth0-audience
+                  key: latest
+            - name: LOCAL_AUTH_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-local-auth-session-secret
+                  key: latest
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: chessapp-redis-url
+                  key: latest

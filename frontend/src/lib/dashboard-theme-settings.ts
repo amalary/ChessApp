@@ -63,22 +63,19 @@ function readActiveLocalAuthUserUnsafe(): LocalAuthActiveUser | null {
   }
 }
 
-function clearLegacyLocalAuthUserIfNeeded(payload: {
-  id: string | null;
-  username: string | null;
-  email: string | null;
-  sessionToken: string | null;
-}): boolean {
+function clearLocalAuthUserWithoutSessionToken(
+  id: string | null,
+  username: string | null,
+  email: string | null,
+  sessionToken: string | null,
+): boolean {
   if (typeof window === 'undefined') {
     return false;
   }
-  const hasIdentity = Boolean(payload.id || payload.username || payload.email);
-  const missingSessionToken = !payload.sessionToken;
-  if (!hasIdentity || !missingSessionToken) {
+  if (!(id || username || email) || sessionToken) {
     return false;
   }
 
-  // Migration guard: pre-session-token local auth entries are no longer trusted.
   window.localStorage.removeItem(LOCAL_AUTH_ACTIVE_USER_STORAGE_KEY);
   dispatchLocalAuthActiveUserUpdatedEvent();
   return true;
@@ -108,14 +105,7 @@ export function readActiveLocalAuthUser(): {
     return null;
   }
 
-  if (
-    clearLegacyLocalAuthUserIfNeeded({
-      id,
-      username,
-      email,
-      sessionToken,
-    })
-  ) {
+  if (clearLocalAuthUserWithoutSessionToken(id, username, email, sessionToken)) {
     return null;
   }
 

@@ -98,7 +98,7 @@ def _env_int(name: str, default: int) -> int:
 
 def _trusted_proxy_networks() -> list:
     configured = os.getenv("TRUSTED_PROXY_CIDRS", _TRUSTED_PROXY_CIDRS_DEFAULT)
-    networks: list[ipaddress._BaseNetwork] = []
+    networks: list[object] = []
     for chunk in configured.split(","):
         candidate = chunk.strip()
         if not candidate:

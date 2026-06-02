@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 
+const LOCAL_AUTH_SESSION_COOKIE = "chessapp_local_auth_session";
+const LOCAL_AUTH_SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
+
 function backendBaseUrl(): string {
   const configured =
     process.env.BACKEND_URL ??
@@ -46,12 +49,35 @@ export async function POST(request: Request) {
       payload = candidate;
     }
 
-    return NextResponse.json(payload, { status: upstream.status });
+    let localSessionToken: string | null = null;
+    if (upstream.ok && payload && typeof payload === "object") {
+      const candidate = payload as { local_session_token?: unknown };
+      if (
+        typeof candidate.local_session_token === "string" &&
+        candidate.local_session_token.trim()
+      ) {
+        localSessionToken = candidate.local_session_token.trim();
+      }
+    }
+
+    const response = NextResponse.json(payload, { status: upstream.status });
+    if (localSessionToken) {
+      response.cookies.set({
+        name: LOCAL_AUTH_SESSION_COOKIE,
+        value: localSessionToken,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+        maxAge: LOCAL_AUTH_SESSION_MAX_AGE_SECONDS,
+      });
+    }
+    return response;
   } catch (error: unknown) {
-    const reason = error instanceof Error ? error.message : "unknown error";
+    console.error("Local auth login proxy failed", error);
     return NextResponse.json(
       {
-        detail: `Cannot reach backend auth service at ${target}. ${reason}`,
+        detail: "Authentication service is unavailable. Please try again shortly.",
       },
       { status: 502 },
     );

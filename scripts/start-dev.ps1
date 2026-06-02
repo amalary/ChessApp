@@ -82,26 +82,44 @@ function Test-BackendHealth {
 }
 
 function Test-AgentChatRoute {
-    try {
-        $payload = @{
-            query = "Where can I change app settings?"
-            limit = 1
-        } | ConvertTo-Json -Compress
+    param(
+        [int]$Attempts = 3,
+        [int]$TimeoutSeconds = 15
+    )
 
-        $chat = Invoke-RestMethod -Uri "http://127.0.0.1:8010/agent/chat" `
-            -Method POST `
-            -ContentType "application/json" `
-            -Body $payload `
-            -TimeoutSec 5
+    $script:LastAgentChatProbeError = $null
+    $payload = @{
+        query = "Where can I change app settings?"
+        limit = 1
+    } | ConvertTo-Json -Compress
 
-        return (
-            $null -ne $chat -and
-            $chat.PSObject.Properties.Name -contains "answer" -and
-            -not [string]::IsNullOrWhiteSpace([string]$chat.answer)
-        )
-    } catch {
-        return $false
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            $chat = Invoke-RestMethod -Uri "http://127.0.0.1:8010/agent/chat" `
+                -Method POST `
+                -ContentType "application/json" `
+                -Body $payload `
+                -TimeoutSec $TimeoutSeconds
+
+            if (
+                $null -ne $chat -and
+                $chat.PSObject.Properties.Name -contains "answer" -and
+                -not [string]::IsNullOrWhiteSpace([string]$chat.answer)
+            ) {
+                return $true
+            }
+
+            $script:LastAgentChatProbeError = "response did not include a non-empty answer"
+        } catch {
+            $script:LastAgentChatProbeError = $_.Exception.Message
+        }
+
+        if ($attempt -lt $Attempts) {
+            Start-Sleep -Seconds 2
+        }
     }
+
+    return $false
 }
 
 function Wait-ForBackendReady {
@@ -144,6 +162,7 @@ $proxyCreds = Join-Path $repoRoot "keys\sa.json"
 $backendPy = Join-Path $repoRoot "backend\.venv\Scripts\python.exe"
 $backendDir = Join-Path $repoRoot "backend"
 $frontendDir = Join-Path $repoRoot "frontend"
+$stockfishPath = Join-Path $repoRoot "tools\stockfish\stockfish\stockfish-windows-x86-64-avx2.exe"
 $npmCmd = "npm.cmd"
 
 foreach ($required in @($proxyExe, $proxyCreds, $backendPy)) {
@@ -206,7 +225,7 @@ if (Test-LocalPort -Port 8010) {
         if ($requireAgentChatReadiness) {
             throw "$msg Set START_DEV_REQUIRE_AGENT_CHAT=false (or remove it) to allow degraded startup."
         }
-        Write-Warning "$msg Agent features may be unavailable until API key/retrieval issues are fixed."
+        Write-Warning "$msg Agent features may be unavailable until API key/retrieval issues are fixed. Last probe error: $script:LastAgentChatProbeError"
     } else {
         Write-Host "Backend: already running and agent endpoint is healthy."
     }
@@ -221,6 +240,9 @@ Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
 `$env:DB_NAME='$dbName'
 `$env:DB_HOST='$dbHost'
 `$env:DB_PORT='$dbPort'
+if (Test-Path -LiteralPath '$stockfishPath') {
+    `$env:STOCKFISH_PATH='$stockfishPath'
+}
 & '$backendPy' -m uvicorn app.main:app --host 127.0.0.1 --port 8010
 "@
     $backendProc = Start-Process -FilePath "powershell.exe" `
@@ -241,7 +263,7 @@ Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
         if ($requireAgentChatReadiness) {
             throw "$msg See $backendErr"
         }
-        Write-Warning "$msg Agent features may be unavailable until API key/retrieval issues are fixed."
+        Write-Warning "$msg Agent features may be unavailable until API key/retrieval issues are fixed. Last probe error: $script:LastAgentChatProbeError"
     } else {
         Write-Host "Backend: started (PID $($backendProc.Id)) and agent endpoint is healthy."
     }

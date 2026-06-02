@@ -18,9 +18,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from app.api.errors import install_api_error_handlers
+from app.auth0 import get_current_user
 from app.db_auth import get_db
 from app.evals.trace_logger import log_solve_trace
-from app.local_auth_user import get_optional_local_auth_user
+from app.local_auth_user import get_optional_local_auth_user_from_current_user
 from app.middleware.rate_limit_middleware import rate_limit_middleware
 from app.models_auth import LocalAuthUser
 from app.routes.agent import router as agent_router
@@ -88,6 +89,12 @@ def _load_env_file(
 
 
 def _bootstrap_env() -> None:
+    app_env = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).lower()
+    if app_env in {"production", "prod"}:
+        if "GOOGLE_API_KEY" not in os.environ and "GEMINI_API_KEY" in os.environ:
+            os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]
+        return
+
     here = Path(__file__).resolve()
     backend_env = here.parents[1] / ".env"
     _load_env_file(
@@ -112,6 +119,13 @@ def _bootstrap_env() -> None:
 
 
 _bootstrap_env()
+
+
+def _env_csv(name: str, default: list[str]) -> list[str]:
+    raw = os.getenv(name, "")
+    if not raw.strip():
+        return default
+    return [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
 
 
 def _env_int(name: str, default: int) -> int:
@@ -265,9 +279,21 @@ def _validate_fen_or_raise(fen: str) -> chess.Board:
 
 
 def _resolve_stockfish_path_or_raise() -> str:
+    bundled_stockfish_path = (
+        Path(__file__).resolve().parents[2]
+        / "tools"
+        / "stockfish"
+        / "stockfish"
+        / "stockfish-windows-x86-64-avx2.exe"
+    )
     stockfish_path = (
         os.environ.get("STOCKFISH_PATH")
         or shutil.which("stockfish")
+        or (
+            str(bundled_stockfish_path)
+            if bundled_stockfish_path.exists()
+            else None
+        )
         or "/usr/games/stockfish"
     )
     if Path(stockfish_path).exists() or shutil.which("stockfish") is not None:
@@ -398,23 +424,32 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 install_api_error_handlers(app)
 
-origins = [
+DEFAULT_CORS_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:3001",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
-    "http://0.0.0.0:3000",
-    "http://0.0.0.0:3001",
     "http://[::1]:3000",
     "http://[::1]:3001",
 ]
+origins = _env_csv("CORS_ALLOWED_ORIGINS", DEFAULT_CORS_ORIGINS)
+origin_regex = os.getenv(
+    "CORS_ALLOWED_ORIGIN_REGEX",
+    r"^https?://(localhost|127\.0\.0\.1|\[::1\]):\d+$",
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=origin_regex,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Local-Auth-User-Id",
+        "X-Local-Auth-Session",
+    ],
 )
 
 # Existing health router
@@ -443,6 +478,7 @@ async def root():
 @app.post("/solve")
 async def solve(
     request: Request,
+    current_user: dict = Depends(get_current_user),
     upload: ValidatedSolveUpload = Depends(validate_solve_upload),
     _engine_guard: None = Depends(enforce_engine_lock),
     expected_side_to_move: str | None = Form(None),
@@ -453,7 +489,6 @@ async def solve(
     attempt_id: str | None = Form(None),
     attempt_created_at: str | None = Form(None),
     db: Session = Depends(get_db),
-    local_auth_user: LocalAuthUser | None = Depends(get_optional_local_auth_user),
 ):
     started_at = perf_counter()
     trace_id = str(uuid.uuid4())
@@ -498,26 +533,6 @@ async def solve(
         gemini_result["side_to_move"] = "white" if chess.Board(fen).turn else "black"
         await clear_failed_solve_attempts(request)
 
-        if local_auth_user is not None:
-            _persist_local_auth_submission(
-                db=db,
-                local_auth_user=local_auth_user,
-                upload=upload,
-                expected_side_to_move=expected_side_to_move,
-                fen=fen,
-                solve_time_ms=solve_time_ms,
-                confidence=confidence,
-                gemini_result=gemini_result,
-                result=result,
-                first_move_uci=first_move_uci,
-                time_to_first_move_seconds=time_to_first_move_seconds,
-                difficulty_rating=difficulty_rating,
-                puzzle_id=puzzle_id,
-                attempt_id=attempt_id,
-                attempt_created_at=attempt_created_at,
-            )
-
-        # 4) Response
         final_response = {
             "fen": fen,
             "vision_confidence": confidence,
@@ -528,6 +543,34 @@ async def solve(
             "moves_san": result.moves_san if result else [],
             "moves_uci": result.moves_uci if result else [],
         }
+
+        try:
+            local_auth_user = get_optional_local_auth_user_from_current_user(
+                current_user,
+                db,
+            )
+            if local_auth_user is not None:
+                _persist_local_auth_submission(
+                    db=db,
+                    local_auth_user=local_auth_user,
+                    upload=upload,
+                    expected_side_to_move=expected_side_to_move,
+                    fen=fen,
+                    solve_time_ms=solve_time_ms,
+                    confidence=confidence,
+                    gemini_result=gemini_result,
+                    result=result,
+                    first_move_uci=first_move_uci,
+                    time_to_first_move_seconds=time_to_first_move_seconds,
+                    difficulty_rating=difficulty_rating,
+                    puzzle_id=puzzle_id,
+                    attempt_id=attempt_id,
+                    attempt_created_at=attempt_created_at,
+                )
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Failed to persist /solve submission: %s", exc)
+
         return final_response
 
     except HTTPException as exc:

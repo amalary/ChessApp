@@ -44,6 +44,7 @@ import {
   formatConversationalText,
   type AssistantRhythmIntent,
 } from '@/lib/assistant-rhythm';
+import { readResponsePayload, responseErrorMessage } from '@/lib/http-response';
 import { getRequestAuthContextClient } from 'lib/getRequestAuthContextClient';
 
 const DASHBOARD_ACCENT_STORAGE_KEY = 'chessapp.dashboard.accent';
@@ -104,7 +105,7 @@ type AmyModeConfig = {
 
 type AmyCueInput = {
   solveSucceeded: boolean;
-  firstMoveStatus: FirstMoveAssessmentStatus;
+  firstMoveStatus: FirstMoveAssessmentStatus | null;
   bestMove: string | null;
   meta: SolveMeta;
 };
@@ -930,7 +931,7 @@ export default function SolveTestClient() {
           return;
         }
 
-        const payload = (await response.json()) as unknown;
+        const { payload } = await readResponsePayload(response);
         if (cancelled || !Array.isArray(payload)) {
           return;
         }
@@ -1071,19 +1072,15 @@ export default function SolveTestClient() {
       return;
     }
 
-    if (!firstMoveAttempt) {
-      setError('Select your first move on the puzzle board before pressing Solve.');
-      setSubmitStatus('idle');
-      return;
-    }
-
     const formData = new FormData();
     formData.append('image', file);
     formData.append('expected_side_to_move', queenIsWhite ? 'white' : 'black');
-    formData.append('first_move_uci', firstMoveAttempt.moveUci);
-    formData.append('time_to_first_move_seconds', String(firstMoveAttempt.timeToFirstMoveSeconds));
     formData.append('attempt_id', attemptId);
-    formData.append('attempt_created_at', firstMoveAttempt.createdAt);
+    if (firstMoveAttempt) {
+      formData.append('first_move_uci', firstMoveAttempt.moveUci);
+      formData.append('time_to_first_move_seconds', String(firstMoveAttempt.timeToFirstMoveSeconds));
+      formData.append('attempt_created_at', firstMoveAttempt.createdAt);
+    }
     formData.append('puzzle_id', createPuzzleId(null, file));
     const solveStartedAt = performance.now();
 
@@ -1108,18 +1105,11 @@ export default function SolveTestClient() {
         body: formData,
       });
 
-      const data: SolveResponse = await res.json();
+      const { payload, text } = await readResponsePayload<SolveResponse>(res);
+      const data = payload ?? {};
 
       if (!res.ok) {
-        let msg = `Error ${res.status}`;
-
-        if (typeof data === 'object' && data !== null) {
-          if ('detail' in data && typeof (data as { detail?: unknown }).detail === 'string') {
-            msg = (data as { detail: string }).detail;
-          } else if ('error' in data && typeof (data as { error?: unknown }).error === 'string') {
-            msg = (data as { error: string }).error;
-          }
-        }
+        const msg = responseErrorMessage(data, `Error ${res.status}`, text);
 
         setError(msg);
         setSubmitStatus('idle');
@@ -1131,14 +1121,16 @@ export default function SolveTestClient() {
         const normalizedLines = lines.length ? lines : ['(No solution returned)'];
         const meta = extractSolveMeta(data);
         const bestMove = extractFirstUciMove(data);
-        const firstMoveClassification = classifyFirstMove(firstMoveAttempt.moveUci, bestMove);
+        const firstMoveClassification = firstMoveAttempt
+          ? classifyFirstMove(firstMoveAttempt.moveUci, bestMove)
+          : null;
         setSolutionLines(normalizedLines);
         setSolveMeta(meta);
         streamAmyCue(
           buildAmyCue(
             {
               solveSucceeded: isSuccessfulSolve(data),
-              firstMoveStatus: firstMoveClassification.status,
+              firstMoveStatus: firstMoveClassification?.status ?? null,
               bestMove,
               meta,
             },
@@ -1167,13 +1159,15 @@ export default function SolveTestClient() {
             invalidReason = 'stockfish_no_mate';
           }
           const isValidForFirstMoveAccuracy = invalidReason === null;
-          setFirstMoveSolveOutcome({
-            status: firstMoveClassification.status,
-            isFirstMoveCorrect: firstMoveClassification.isFirstMoveCorrect,
-            bestMove,
-            isValidForFirstMoveAccuracy,
-            invalidReason,
-          });
+          if (firstMoveAttempt && firstMoveClassification) {
+            setFirstMoveSolveOutcome({
+              status: firstMoveClassification.status,
+              isFirstMoveCorrect: firstMoveClassification.isFirstMoveCorrect,
+              bestMove,
+              isValidForFirstMoveAccuracy,
+              invalidReason,
+            });
+          }
           const puzzleElo = estimatePuzzleElo({
             solveTimeMs,
             mateIn: meta.mateIn,
@@ -1190,24 +1184,32 @@ export default function SolveTestClient() {
             originalPuzzleImageDataUrl,
             positionCheck: meta,
             solutionLines: normalizedLines,
-            firstMoveAssessment: {
-              firstMove: firstMoveAttempt.moveUci,
-              bestMove,
-              isFirstMoveCorrect: firstMoveClassification.isFirstMoveCorrect,
-              status: firstMoveClassification.status,
-              timeToFirstMoveSeconds: firstMoveAttempt.timeToFirstMoveSeconds,
-              puzzleId: createPuzzleId(data.fen, file),
-              userId: user?.sub ?? localAuthUserId,
-              attemptId,
-              createdAt: firstMoveAttempt.createdAt,
-              isValidForFirstMoveAccuracy,
-              invalidReason,
-            },
+            firstMoveAssessment:
+              firstMoveAttempt && firstMoveClassification
+                ? {
+                    firstMove: firstMoveAttempt.moveUci,
+                    bestMove,
+                    isFirstMoveCorrect: firstMoveClassification.isFirstMoveCorrect,
+                    status: firstMoveClassification.status,
+                    timeToFirstMoveSeconds: firstMoveAttempt.timeToFirstMoveSeconds,
+                    puzzleId: createPuzzleId(data.fen, file),
+                    userId: user?.sub ?? localAuthUserId,
+                    attemptId,
+                    createdAt: firstMoveAttempt.createdAt,
+                    isValidForFirstMoveAccuracy,
+                    invalidReason,
+                  }
+                : null,
           });
         }
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Network error';
+      const message =
+        err instanceof TypeError && err.message.toLowerCase().includes('fetch')
+          ? `Cannot reach solver backend at ${backendUrl}. Start backend and verify ${backendUrl}/health returns {"status":"ok"}.`
+          : err instanceof Error
+            ? err.message
+            : 'Network error';
       setError(message);
       setSubmitStatus('idle');
       clearAmyTimers();
@@ -1684,28 +1686,14 @@ export default function SolveTestClient() {
                         : 'opacity-0 translate-y-1 scale-[0.98] pointer-events-none'
                     }`}
                   >
-                    {file && !firstMoveAttempt ? (
-                      <label
-                        htmlFor={controlsLocked ? undefined : fileInputId}
-                        onClick={controlsLocked ? (e) => e.preventDefault() : undefined}
-                        className={`neumo-pill w-full h-full px-6 py-3 text-sm sm:px-8 sm:text-base font-medium text-center flex items-center justify-center ${pressable} ${
-                          controlsLocked ? 'cursor-not-allowed opacity-60 pointer-events-none' : 'cursor-pointer'
-                        }`}
-                        style={themedButtonStyle}
-                        aria-disabled={controlsLocked}
-                      >
-                        Replace Image
-                      </label>
-                    ) : (
-                      <button
-                        type="submit"
-                        disabled={!file || !firstMoveAttempt}
-                        className={`neumo-pill w-full h-full px-8 py-3 text-base font-medium disabled:opacity-60 disabled:active:translate-y-0 ${pressable}`}
-                        style={themedButtonStyle}
-                      >
-                        Solve
-                      </button>
-                    )}
+                    <button
+                      type="submit"
+                      disabled={!file}
+                      className={`neumo-pill w-full h-full px-8 py-3 text-base font-medium disabled:opacity-60 disabled:active:translate-y-0 ${pressable}`}
+                      style={themedButtonStyle}
+                    >
+                      Solve
+                    </button>
                   </div>
                 </div>
               )}

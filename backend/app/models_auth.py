@@ -12,6 +12,7 @@ class LocalAuthUser(Base):
     __tablename__ = "local_auth_users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    auth0_sub = Column(Text, unique=True, nullable=True, index=True)
     username = Column(Text, unique=True, nullable=False)
     email = Column(Text, unique=True, nullable=False)
     password_hash = Column(Text, nullable=False)

@@ -45,6 +45,7 @@ import {
   writeAssistantConversationMode,
   type AssistantConversationMode,
 } from '@/lib/assistant-conversation-mode';
+import { readResponsePayload, responseErrorMessage } from '@/lib/http-response';
 import { getRequestAuthContextClient } from 'lib/getRequestAuthContextClient';
 
 type NavItem = {
@@ -2791,7 +2792,7 @@ function DashboardPageContent() {
       const localAuthUser = readActiveLocalAuthUser();
       const hasSession =
         Boolean(user?.sub) ||
-        Boolean(localAuthUser?.id && localAuthUser?.sessionToken);
+        Boolean(localAuthUser?.id);
       setHasAuthenticatedSession(hasSession);
       setHasVerifiedAuthState(true);
       if (!hasSession) {
@@ -3058,10 +3059,16 @@ function DashboardPageContent() {
           cache: 'no-store',
           signal: controller.signal,
         });
+        const { payload, text } = await readResponsePayload(response);
         if (!response.ok) {
-          throw new Error(`difficulty analytics fetch failed: ${response.status}`);
+          throw new Error(
+            responseErrorMessage(
+              payload,
+              `difficulty analytics fetch failed: ${response.status}`,
+              text,
+            ),
+          );
         }
-        const payload = (await response.json()) as unknown;
         const normalized = normalizeDifficultyBucketAnalyticsPayload(payload);
         if (cancelled) {
           return;
@@ -3109,11 +3116,17 @@ function DashboardPageContent() {
           cache: 'no-store',
           signal: controller.signal,
         });
+        const { payload, text } = await readResponsePayload(response);
         if (!response.ok) {
-          throw new Error(`puzzle submissions sync failed: ${response.status}`);
+          throw new Error(
+            responseErrorMessage(
+              payload,
+              `puzzle submissions sync failed: ${response.status}`,
+              text,
+            ),
+          );
         }
 
-        const payload = (await response.json()) as unknown;
         if (!Array.isArray(payload)) {
           throw new Error('puzzle submissions sync returned unexpected payload');
         }

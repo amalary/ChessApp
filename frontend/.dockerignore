@@ -1,3 +1,9 @@
 node_modules
 .next
 .git
+.env
+.env.*
+*.log
+auth0_probe_report.json
+auth0_health_report.json
+api_auth_me_response_*
