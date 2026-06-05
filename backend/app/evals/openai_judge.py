@@ -5,7 +5,6 @@ import os
 from typing import Any
 from urllib import error, request
 
-
 _OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 _DEFAULT_MODEL = "gpt-4o-mini"
 
