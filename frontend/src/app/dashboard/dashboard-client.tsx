@@ -12,7 +12,6 @@ import {
   Bot,
   ChevronDown,
   ChevronUp,
-  Download,
   House,
   LayoutDashboard,
   LogOut,
@@ -2000,7 +1999,6 @@ function AreaChart({
   axisLabels,
   yAxisTicks,
   sectionStyle,
-  buttonStyle,
 }: {
   title: string;
   subtitle: string;
@@ -2008,7 +2006,6 @@ function AreaChart({
   axisLabels?: string[];
   yAxisTicks?: number[];
   sectionStyle?: React.CSSProperties;
-  buttonStyle?: React.CSSProperties;
 }) {
   const { areaPath, linePath } = useMemo(() => buildChartPaths(values, 860, 190), [values]);
   const chartId = title.toLowerCase().replace(/\s+/g, '-');
@@ -2030,14 +2027,6 @@ function AreaChart({
           <h2 className="text-3xl font-semibold tracking-tight text-slate-700">{title}</h2>
           <p className="text-sm text-slate-500">{subtitle}</p>
         </div>
-        <button
-          type="button"
-          className="neumo-pill px-4 py-2 text-xs font-semibold text-slate-500 flex items-center gap-2 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
-          style={buttonStyle}
-        >
-          <Download className="h-4 w-4" />
-          download svg
-        </button>
       </div>
 
       <div className="mt-5">
@@ -3126,6 +3115,7 @@ function NeumorphicColorWheel({
 }
 
 function SettingsPanel({
+  backendUrl,
   isDark,
   accentColor,
   accentChannels,
@@ -3147,6 +3137,7 @@ function SettingsPanel({
   sectionStyle,
   buttonStyle,
 }: {
+  backendUrl: string;
   isDark: boolean;
   accentColor: string;
   accentChannels: [number, number, number];
@@ -3169,6 +3160,136 @@ function SettingsPanel({
   buttonStyle?: React.CSSProperties;
 }) {
   const swatchColors = NEUMORPHIC_SWATCH_COLORS;
+  const { user } = useUser();
+  const [activeLocalUser, setActiveLocalUser] = useState(() => readActiveLocalAuthUser());
+  const [profileEmail, setProfileEmail] = useState('');
+  const [profileUsername, setProfileUsername] = useState('');
+  const [profileStatus, setProfileStatus] = useState<string | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordStatus, setPasswordStatus] = useState<string | null>(null);
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const authDisplayEmail = typeof user?.email === 'string' ? user.email : '';
+  const authDisplayName =
+    (typeof user?.name === 'string' && user.name.trim()) ||
+    (typeof user?.nickname === 'string' && user.nickname.trim()) ||
+    authDisplayEmail;
+  const hasLocalSession = Boolean(activeLocalUser?.id && activeLocalUser?.sessionToken);
+
+  useEffect(() => {
+    const syncActiveLocalUser = () => {
+      setActiveLocalUser(readActiveLocalAuthUser());
+    };
+
+    syncActiveLocalUser();
+    window.addEventListener(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT, syncActiveLocalUser);
+    window.addEventListener('storage', syncActiveLocalUser);
+    return () => {
+      window.removeEventListener(LOCAL_AUTH_ACTIVE_USER_UPDATED_EVENT, syncActiveLocalUser);
+      window.removeEventListener('storage', syncActiveLocalUser);
+    };
+  }, []);
+
+  useEffect(() => {
+    setProfileEmail(activeLocalUser?.email ?? authDisplayEmail ?? '');
+    setProfileUsername(activeLocalUser?.username ?? authDisplayName ?? '');
+  }, [activeLocalUser?.email, activeLocalUser?.username, authDisplayEmail, authDisplayName]);
+
+  const handleProfileSave = async () => {
+    setProfileStatus(null);
+    const nextEmail = profileEmail.trim().toLowerCase();
+    const nextUsername = profileUsername.trim();
+    if (!hasLocalSession) {
+      setProfileStatus('Sign in with a local account to update profile details.');
+      return;
+    }
+    if (!nextEmail || !nextUsername) {
+      setProfileStatus('Email and username are required.');
+      return;
+    }
+
+    setProfileSaving(true);
+    try {
+      const authContext = await getRequestAuthContextClient({ includeJsonContentType: true });
+      const response = await fetch(`${backendUrl}/auth/me/local/profile`, {
+        method: 'PATCH',
+        headers: authContext.headers,
+        body: JSON.stringify({ email: nextEmail, username: nextUsername }),
+      });
+      const { payload, text } = await readResponsePayload<{
+        id?: string;
+        username?: string;
+        email?: string;
+      }>(response);
+
+      if (!response.ok) {
+        setProfileStatus(responseErrorMessage(payload, 'Could not save profile.', text));
+        return;
+      }
+
+      const updatedUser = {
+        id: typeof payload?.id === 'string' ? payload.id : activeLocalUser?.id ?? '',
+        username: typeof payload?.username === 'string' ? payload.username : nextUsername,
+        email: typeof payload?.email === 'string' ? payload.email : nextEmail,
+        sessionToken: activeLocalUser?.sessionToken ?? '',
+      };
+      writeActiveLocalAuthUser(updatedUser);
+      setProfileStatus('Profile saved.');
+    } catch {
+      setProfileStatus('Could not reach the profile service.');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const handlePasswordUpdate = async () => {
+    setPasswordStatus(null);
+    if (!hasLocalSession) {
+      setPasswordStatus('Sign in with a local account to change your password.');
+      return;
+    }
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordStatus('Current password, new password, and confirmation are required.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordStatus('New password and confirmation do not match.');
+      return;
+    }
+    if (newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword)) {
+      setPasswordStatus('New password must be at least 8 characters and include a letter and number.');
+      return;
+    }
+
+    setPasswordSaving(true);
+    try {
+      const authContext = await getRequestAuthContextClient({ includeJsonContentType: true });
+      const response = await fetch(`${backendUrl}/auth/me/local/password`, {
+        method: 'POST',
+        headers: authContext.headers,
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      });
+      const { payload, text } = await readResponsePayload(response);
+      if (!response.ok) {
+        setPasswordStatus(responseErrorMessage(payload, 'Could not update password.', text));
+        return;
+      }
+
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordStatus('Password updated.');
+    } catch {
+      setPasswordStatus('Could not reach the password service.');
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -3188,7 +3309,9 @@ function SettingsPanel({
                 <span className="text-xs text-slate-500">Email</span>
                 <input
                   type="email"
-                  defaultValue="player@chessapp.com"
+                  value={profileEmail}
+                  onChange={(event) => setProfileEmail(event.target.value)}
+                  autoComplete="email"
                   className="mt-1 w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
                 />
               </label>
@@ -3196,17 +3319,22 @@ function SettingsPanel({
                 <span className="text-xs text-slate-500">Username</span>
                 <input
                   type="text"
-                  defaultValue="ChessTactician"
+                  value={profileUsername}
+                  onChange={(event) => setProfileUsername(event.target.value)}
+                  autoComplete="username"
                   className="mt-1 w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
                 />
               </label>
               <button
                 type="button"
+                onClick={handleProfileSave}
+                disabled={profileSaving || !hasLocalSession}
                 className="neumo-pill mt-1 px-4 py-2 text-sm font-semibold text-slate-600 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                 style={buttonStyle}
               >
-                Save profile
+                {profileSaving ? 'Saving...' : 'Save profile'}
               </button>
+              {profileStatus && <p className="text-xs text-slate-500">{profileStatus}</p>}
             </div>
           </article>
 
@@ -3219,6 +3347,9 @@ function SettingsPanel({
                 <span className="text-xs text-slate-500">Current password</span>
                 <input
                   type="password"
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  autoComplete="current-password"
                   className="mt-1 w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
                 />
               </label>
@@ -3226,6 +3357,9 @@ function SettingsPanel({
                 <span className="text-xs text-slate-500">New password</span>
                 <input
                   type="password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  autoComplete="new-password"
                   className="mt-1 w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
                 />
               </label>
@@ -3233,16 +3367,22 @@ function SettingsPanel({
                 <span className="text-xs text-slate-500">Confirm password</span>
                 <input
                   type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  autoComplete="new-password"
                   className="mt-1 w-full rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
                 />
               </label>
               <button
                 type="button"
+                onClick={handlePasswordUpdate}
+                disabled={passwordSaving || !hasLocalSession}
                 className="neumo-pill mt-1 px-4 py-2 text-sm font-semibold text-slate-600 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-700 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)]"
                 style={buttonStyle}
               >
-                Update password
+                {passwordSaving ? 'Updating...' : 'Update password'}
               </button>
+              {passwordStatus && <p className="text-xs text-slate-500">{passwordStatus}</p>}
             </div>
           </article>
         </div>
@@ -3264,13 +3404,35 @@ function SettingsPanel({
                   onClick={() => onAssistantConversationModeChange(option.value)}
                   className={`rounded-2xl border px-3 py-2 text-left transition-all duration-200 ${
                     isActive
-                      ? 'border-cyan-300/80 bg-cyan-50/75 shadow-[0_8px_16px_rgba(15,23,42,0.1)]'
-                      : 'border-slate-200/70 bg-white/80 hover:border-cyan-200/70'
+                      ? isDark
+                        ? 'border-slate-500/80 bg-slate-700/85 shadow-[0_8px_16px_rgba(0,0,0,0.28)]'
+                        : 'border-cyan-300/80 bg-cyan-50/75 shadow-[0_8px_16px_rgba(15,23,42,0.1)]'
+                      : isDark
+                        ? 'border-slate-700/70 bg-slate-900/45 hover:border-slate-500/80'
+                        : 'border-slate-200/70 bg-white/80 hover:border-cyan-200/70'
                   }`}
                 >
-                  <p className="text-sm font-semibold text-slate-700">{option.label}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">{option.tone}</p>
-                  <p className="mt-1 text-xs text-slate-600">&quot;{option.sample}&quot;</p>
+                  <p
+                    className={`text-sm font-semibold ${
+                      isActive && isDark ? 'text-slate-50' : 'text-slate-700 dark:text-slate-200'
+                    }`}
+                  >
+                    {option.label}
+                  </p>
+                  <p
+                    className={`mt-0.5 text-xs ${
+                      isActive && isDark ? 'text-slate-200' : 'text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
+                    {option.tone}
+                  </p>
+                  <p
+                    className={`mt-1 text-xs ${
+                      isActive && isDark ? 'text-slate-100' : 'text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    &quot;{option.sample}&quot;
+                  </p>
                 </button>
               );
             })}
@@ -4673,7 +4835,6 @@ function DashboardPageContent() {
                   axisLabels={puzzleActivityData.axisLabels}
                   yAxisTicks={puzzleActivityYAxisTicks}
                   sectionStyle={dashboardContainerStyle}
-                  buttonStyle={dashboardButtonStyle}
                 />
                 <PuzzleEloProgressSection
                   data={dashboardPuzzleEloProgressData}
@@ -5356,6 +5517,7 @@ function DashboardPageContent() {
 
             {isSettingsView && (
               <SettingsPanel
+                backendUrl={backendUrl}
                 isDark={isDark}
                 accentColor={accentColor}
                 accentChannels={accentChannels}

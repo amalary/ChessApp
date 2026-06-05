@@ -564,7 +564,7 @@ export default function SolveTestClient() {
   const [showLowConfidenceHint, setShowLowConfidenceHint] = useState(false);
   const [coachCueBeats, setCoachCueBeats] = useState<string[]>([]);
   const [amyPhase, setAmyPhase] = useState<AmyAssistantPhase>('idle');
-  const [amyIsTyping, setAmyIsTyping] = useState(false);
+  const [, setAmyIsTyping] = useState(false);
   const [amyConversationMode, setAmyConversationMode] = useState<AmyConversationMode>('coach');
   const [attemptId, setAttemptId] = useState<string>(() => createAttemptId());
   const [attemptStartedAtMs, setAttemptStartedAtMs] = useState<number | null>(null);
@@ -1278,15 +1278,8 @@ export default function SolveTestClient() {
   const controlsLocked = loading || isTransitioningToDashboard;
   const hasSolveResponse = solutionLines.length > 0 || solveMeta !== null;
   const canClickPuzzleToReplace = !!previewUrl && hasSolveResponse && !controlsLocked;
-  const showAmyStatus = true;
   const displayedAmyPhase: AmyAssistantPhase =
     amyPhase === 'idle' && loading ? 'thinking' : amyPhase;
-  const activeModeConfig = AMY_MODE_CONFIG[amyConversationMode];
-  const amyStatusText = activeModeConfig.phaseLabels[displayedAmyPhase];
-  const amyEmotionalStateText =
-    displayedAmyPhase === 'idle'
-      ? activeModeConfig.modeIndicator
-      : activeModeConfig.emotionalStates[displayedAmyPhase];
   const analysisIsActive =
     loading ||
     displayedAmyPhase === 'thinking' ||
@@ -1710,66 +1703,6 @@ export default function SolveTestClient() {
 
           <div className="mt-8 neumo-surface-soft p-5 sm:p-6 md:p-8 solve-cinematic-solution" style={chessAppPanelStyle}>
             <h2 className="mb-4 text-2xl font-semibold tracking-tight sm:mb-5 sm:text-3xl md:text-4xl">Solution</h2>
-            <div className="mb-5 flex flex-wrap gap-2">
-              {AMY_CONVERSATION_MODE_ORDER.map((mode) => {
-                const isActive = amyConversationMode === mode;
-                const modeLabel = AMY_MODE_CONFIG[mode].label;
-                return (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => {
-                      setAmyConversationMode(mode);
-                      if (!loading) {
-                        resetAmyState();
-                      }
-                    }}
-                    disabled={controlsLocked}
-                    className={`rounded-full px-3 py-1.5 text-xs font-semibold tracking-wide transition ${
-                      isActive
-                        ? 'neumo-pill text-slate-700 dark:text-slate-100'
-                        : 'neumo-inset text-slate-500 dark:text-slate-300'
-                    } ${controlsLocked ? 'opacity-65 cursor-not-allowed' : 'hover:-translate-y-[1px]'}`}
-                    aria-pressed={isActive}
-                    aria-label={`Switch Amy to ${modeLabel} mode`}
-                    title={modeLabel}
-                  >
-                    {modeLabel}
-                  </button>
-                );
-              })}
-            </div>
-            {showAmyStatus && (
-              <div
-                className={`mb-5 amy-solve-status chess-stream-item ${
-                  displayedAmyPhase !== 'idle' ? 'amy-solve-status--active' : ''
-                } ${analysisIsActive ? 'amy-solve-status--intense' : ''}`}
-                role="status"
-                aria-live="polite"
-              >
-                <span className="amy-solve-status__dot" aria-hidden="true" />
-                <span className="min-w-0 flex-1 leading-tight">
-                  <span className="block text-sm font-medium">{amyStatusText}</span>
-                  <span className="block text-[11px] opacity-70 tracking-wide uppercase">
-                    {amyEmotionalStateText}
-                  </span>
-                </span>
-                {amyIsTyping && (
-                  <span className="amy-solve-typing" aria-label="Amy is typing">
-                    typing
-                  </span>
-                )}
-              </div>
-            )}
-            <div className="mb-5 chess-eval-shell chess-stream-item" aria-hidden="true">
-              <div className="chess-eval-line">
-                <span
-                  className="chess-eval-line__fill"
-                  style={{ width: `${Math.round(confidenceScore * 100)}%` }}
-                />
-              </div>
-              <span className={`chess-eval-pulse ${analysisIsActive ? 'chess-eval-pulse--active' : ''}`} />
-            </div>
 
             {coachCueBeats.length > 0 && (
               <div className="mb-5 space-y-2">

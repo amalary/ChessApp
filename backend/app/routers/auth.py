@@ -16,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.db_auth import get_db
 from app.db_auth import get_auth_db_runtime_status
+from app.local_auth_user import get_required_local_auth_user
 from app.local_auth_session import issue_local_auth_session_token
 from app.models_auth import LocalAuthUser
 from app.security import hash_password, verify_password
@@ -114,6 +115,38 @@ class AuthResponse(BaseModel):
     message: str
     user: UserView
     local_session_token: str
+
+
+class ProfileUpdateRequest(BaseModel):
+    username: str
+    email: str
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        return SignupRequest.validate_username(value)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return SignupRequest.validate_email(value)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("current_password")
+    @classmethod
+    def ensure_current_password(cls, value: str) -> str:
+        if not value:
+            raise ValueError("Current password is required.")
+        return value
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        return SignupRequest.validate_password(value)
 
 
 def _normalize_auth0_domain(domain: str) -> str:
@@ -446,6 +479,92 @@ def _auth0_signup(payload: SignupRequest) -> None:
         ) from exc
 
 
+def _auth0_management_api_token(config: dict[str, str]) -> str:
+    payload = {
+        "grant_type": "client_credentials",
+        "client_id": config["client_id"],
+        "client_secret": config["client_secret"],
+        "audience": f"{config['domain']}/api/v2/",
+    }
+    try:
+        response_payload = _auth0_token_exchange(payload, config["domain"])
+    except urllib_error.HTTPError as exc:
+        error_payload = _json_from_bytes(exc.read())
+        description = str(
+            error_payload.get("error_description", "")
+            or error_payload.get("message", "")
+        ).strip()
+        raise HTTPException(
+            status_code=502,
+            detail=description or AUTH0_UPSTREAM_UNAVAILABLE_DETAIL,
+        ) from exc
+    except urllib_error.URLError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=AUTH0_UPSTREAM_UNAVAILABLE_DETAIL,
+        ) from exc
+
+    token = response_payload.get("access_token")
+    if not isinstance(token, str) or not token.strip():
+        raise HTTPException(
+            status_code=502,
+            detail="Auth0 did not return a management API access token.",
+        )
+    return token.strip()
+
+
+def _auth0_update_user_password(auth0_sub: str, new_password: str) -> None:
+    config = _auth0_config()
+    if config is None:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Auth0 is not configured for password updates. "
+                "Set AUTH0_DOMAIN (or AUTH0_ISSUER_BASE_URL), AUTH0_CLIENT_ID, "
+                "and AUTH0_CLIENT_SECRET."
+            ),
+        )
+
+    token = _auth0_management_api_token(config)
+    request_body = json.dumps(
+        {
+            "password": new_password,
+            "connection": config["connection"],
+        }
+    ).encode("utf-8")
+    user_id = urllib_parse.quote(auth0_sub, safe="")
+    request = urllib_request.Request(
+        url=f"{config['domain']}/api/v2/users/{user_id}",
+        data=request_body,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        method="PATCH",
+    )
+
+    try:
+        with urllib_request.urlopen(
+            request, timeout=AUTH0_REQUEST_TIMEOUT_SECONDS
+        ) as _response:
+            return
+    except urllib_error.HTTPError as exc:
+        error_payload = _json_from_bytes(exc.read())
+        description = str(
+            error_payload.get("error_description", "")
+            or error_payload.get("message", "")
+        ).strip()
+        raise HTTPException(
+            status_code=502,
+            detail=description or AUTH0_UPSTREAM_UNAVAILABLE_DETAIL,
+        ) from exc
+    except urllib_error.URLError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=AUTH0_UPSTREAM_UNAVAILABLE_DETAIL,
+        ) from exc
+
+
 def _to_user_view(user: LocalAuthUser) -> UserView:
     return UserView(
         id=user.id,
@@ -607,6 +726,79 @@ def _finalize_existing_local_login(
 
 def _raise_db_unavailable(detail: str) -> None:
     raise HTTPException(status_code=503, detail=detail)
+
+
+@router.get("/me/local", response_model=UserView)
+def get_local_profile(
+    user: LocalAuthUser = Depends(get_required_local_auth_user),
+):
+    return _to_user_view(user)
+
+
+@router.patch("/me/local/profile", response_model=UserView)
+def update_local_profile(
+    payload: ProfileUpdateRequest,
+    user: LocalAuthUser = Depends(get_required_local_auth_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        existing_user = db.execute(
+            select(LocalAuthUser).where(
+                LocalAuthUser.id != user.id,
+                or_(
+                    func.lower(LocalAuthUser.username) == payload.username.lower(),
+                    func.lower(LocalAuthUser.email) == payload.email.lower(),
+                ),
+            )
+        ).scalar_one_or_none()
+        if existing_user is not None:
+            raise HTTPException(
+                status_code=409, detail="Username or email is already registered."
+            )
+
+        user.username = payload.username
+        user.email = payload.email
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return _to_user_view(user)
+    except HTTPException:
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.exception("Profile update database operation failed: %s", exc)
+        _raise_db_unavailable("Database unavailable for profile update.")
+
+
+@router.post("/me/local/password")
+def change_local_password(
+    payload: PasswordChangeRequest,
+    user: LocalAuthUser = Depends(get_required_local_auth_user),
+    db: Session = Depends(get_db),
+):
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect.")
+    if payload.current_password == payload.new_password:
+        raise HTTPException(
+            status_code=400,
+            detail="New password must be different from the current password.",
+        )
+
+    try:
+        if _sync_local_auth_with_auth0() and user.auth0_sub:
+            _auth0_update_user_password(user.auth0_sub, payload.new_password)
+
+        user.password_hash = hash_password(payload.new_password)
+        db.add(user)
+        db.commit()
+        return {"message": "Password updated successfully."}
+    except HTTPException:
+        db.rollback()
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.exception("Password update database operation failed: %s", exc)
+        _raise_db_unavailable("Database unavailable for password update.")
 
 
 @router.post("/signup", response_model=AuthResponse, status_code=201)
