@@ -157,6 +157,7 @@ stage('Lint: Frontend') {
               --image "${BACKEND_IMAGE}" \
               --region "${GCP_REGION}" \
               --platform managed \
+              --port 8080 \
               --allow-unauthenticated
 
             gcloud run deploy "${FRONTEND_SERVICE}" \
