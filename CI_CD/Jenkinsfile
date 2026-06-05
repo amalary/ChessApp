@@ -87,33 +87,34 @@ stage('Lint: Frontend') {
           set -eu
           CONTAINER_NAME="puzzle-backend-smoke-${BUILD_NUMBER}"
           REDIS_NAME="${CONTAINER_NAME}-redis"
+          NETWORK_NAME="${CONTAINER_NAME}-net"
           docker rm -f "${CONTAINER_NAME}" "${REDIS_NAME}" >/dev/null 2>&1 || true
+          docker network rm "${NETWORK_NAME}" >/dev/null 2>&1 || true
 
           cleanup() {
-            docker logs "${CONTAINER_NAME}" || true
             docker rm -f "${CONTAINER_NAME}" "${REDIS_NAME}" >/dev/null 2>&1 || true
+            docker network rm "${NETWORK_NAME}" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
 
-          docker run -d --name "${REDIS_NAME}" redis:7-alpine
-          REDIS_IP="$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${REDIS_NAME}")"
+          docker network create "${NETWORK_NAME}"
+          docker run -d \
+            --name "${REDIS_NAME}" \
+            --network "${NETWORK_NAME}" \
+            --network-alias redis \
+            redis:7-alpine
 
           docker run -d \
             --name "${CONTAINER_NAME}" \
+            --network "${NETWORK_NAME}" \
+            --network-alias backend \
             -e PORT=8080 \
-            -e REDIS_URL="redis://${REDIS_IP}:6379/0" \
-            -p 18080:8080 \
+            -e REDIS_URL="redis://redis:6379/0" \
             "${DOCKERHUB_USR}/puzzle-backend:latest"
 
-          docker port "${CONTAINER_NAME}"
-
           smoke_curl() {
-            curl -fsS http://127.0.0.1:18080/ && return 0
-
-            # Containerized Jenkins may not share localhost with the Docker daemon.
-            # Keep the same smoke-test URL, but issue it from Docker's host network.
-            docker run --rm --network host curlimages/curl:8.10.1 \
-              -fsS http://127.0.0.1:18080/
+            docker run --rm --network "${NETWORK_NAME}" curlimages/curl:8.10.1 \
+              -fsS http://backend:8080/
           }
 
           for i in $(seq 1 30); do
@@ -124,7 +125,8 @@ stage('Lint: Frontend') {
           done
 
           echo "Backend container failed local / smoke test."
-          docker ps --filter "name=${CONTAINER_NAME}"
+          docker logs "${CONTAINER_NAME}" || true
+          docker ps
           exit 1
         '''
         sh '''
