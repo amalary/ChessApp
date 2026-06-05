@@ -139,11 +139,7 @@ def judge_gemini_output(
         with request.urlopen(req, timeout=30) as resp:
             raw_body = resp.read().decode("utf-8")
         body = json.loads(raw_body)
-        content = (
-            body.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-        )
+        content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
         result = _extract_json_object(content) if isinstance(content, str) else {}
         if not isinstance(result, dict):
             return _fallback_result("OpenAI judge returned a non-JSON result.")

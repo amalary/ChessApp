@@ -277,7 +277,10 @@ def judge_gemini_output(
     if not api_key:
         return _judge_fallback("OpenAI judge unavailable: OPENAI_API_KEY is missing.")
 
-    model = os.getenv("EVAL_JUDGE_MODEL", _DEFAULT_JUDGE_MODEL).strip() or _DEFAULT_JUDGE_MODEL
+    model = (
+        os.getenv("EVAL_JUDGE_MODEL", _DEFAULT_JUDGE_MODEL).strip()
+        or _DEFAULT_JUDGE_MODEL
+    )
     judge_input = {
         "gemini_raw_output": gemini_raw_output,
         "parsed_fen": parsed_fen,
@@ -522,9 +525,12 @@ def _run_case(
     cases_path: Path,
     stockfish_path: str,
 ) -> dict[str, Any]:
-    case_id = _normalize_optional_str(
-        _get_first(raw_case, "id", "case_id", "name", "caseName")
-    ) or f"case_{case_index + 1:03d}"
+    case_id = (
+        _normalize_optional_str(
+            _get_first(raw_case, "id", "case_id", "name", "caseName")
+        )
+        or f"case_{case_index + 1:03d}"
+    )
     image_field = _normalize_optional_str(
         _get_first(
             raw_case,
@@ -562,7 +568,9 @@ def _run_case(
         )
     )
     expected_side_to_move = _normalize_optional_str(
-        _get_first(raw_case, "expected_side_to_move", "expectedSideToMove", "side_to_move")
+        _get_first(
+            raw_case, "expected_side_to_move", "expectedSideToMove", "side_to_move"
+        )
     )
 
     image_path = _resolve_image_path(image_field, cases_path=cases_path)
@@ -634,7 +642,9 @@ def _run_case(
             )
         ),
         (
-            evaluate_expected_mate_depth_match(stockfish_mate_depth, expected_mate_depth)
+            evaluate_expected_mate_depth_match(
+                stockfish_mate_depth, expected_mate_depth
+            )
             if expected_mate_depth is not None
             else _skipped_result(
                 "expected_mate_depth_match", "Skipped: expected_mate_depth missing."
@@ -710,7 +720,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run chess solve evals across Gemini, Stockfish, deterministic checks, and OpenAI judge."
     )
-    parser.add_argument("--quick", action="store_true", help="Run only the first 3 cases.")
+    parser.add_argument(
+        "--quick", action="store_true", help="Run only the first 3 cases."
+    )
     parser.add_argument(
         "--cases",
         default=str(DEFAULT_CASES_PATH),
@@ -788,8 +800,14 @@ def main() -> int:
         has_error = bool(row.get("error_message"))
         mismatch = (
             (expected_fen is not None and not det.get("expected_fen_match", False))
-            or (expected_best is not None and not det.get("expected_best_move_match", False))
-            or (expected_mate is not None and not det.get("expected_mate_depth_match", False))
+            or (
+                expected_best is not None
+                and not det.get("expected_best_move_match", False)
+            )
+            or (
+                expected_mate is not None
+                and not det.get("expected_mate_depth_match", False)
+            )
         )
         if has_error or mismatch:
             failed_cases.append(case_id)
@@ -811,11 +829,15 @@ def main() -> int:
         "mate_depth_accuracy": mate_metric.ratio(),
         "mate_depth_accuracy_hits": mate_metric.hit,
         "mate_depth_accuracy_total": mate_metric.total,
-        "average_openai_judge_score": round(mean(judge_scores), 4) if judge_scores else 0.0,
+        "average_openai_judge_score": (
+            round(mean(judge_scores), 4) if judge_scores else 0.0
+        ),
         "failed_cases": failed_cases,
     }
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=True), encoding="utf-8")
+    summary_path.write_text(
+        json.dumps(summary, indent=2, ensure_ascii=True), encoding="utf-8"
+    )
 
     _print_summary(summary)
     return 0

@@ -350,7 +350,9 @@ def fen_from_image_bytes(
     )
     min_attempts = max(1, _env_int("GEMINI_MIN_ATTEMPTS", 3))
     max_attempts = max(1, _env_int("GEMINI_TRANSCRIBE_ATTEMPTS", attempts))
-    max_attempts = min(max_attempts, max(1, _env_int("GEMINI_MAX_ATTEMPTS_HARD_CAP", 5)))
+    max_attempts = min(
+        max_attempts, max(1, _env_int("GEMINI_MAX_ATTEMPTS_HARD_CAP", 5))
+    )
     consensus_exit_votes = max(2, _env_int("GEMINI_CONSENSUS_EXIT_VOTES", 3))
 
     for idx in range(max_attempts):

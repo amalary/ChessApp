@@ -289,11 +289,7 @@ def _resolve_stockfish_path_or_raise() -> str:
     stockfish_path = (
         os.environ.get("STOCKFISH_PATH")
         or shutil.which("stockfish")
-        or (
-            str(bundled_stockfish_path)
-            if bundled_stockfish_path.exists()
-            else None
-        )
+        or (str(bundled_stockfish_path) if bundled_stockfish_path.exists() else None)
         or "/usr/games/stockfish"
     )
     if Path(stockfish_path).exists() or shutil.which("stockfish") is not None:

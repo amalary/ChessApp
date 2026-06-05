@@ -327,4 +327,3 @@ def build_puzzle_context(puzzle: Any) -> str:
         f"Source Image Ref: {payload['source_image_reference']}",
     ]
     return "\n".join(lines)
-

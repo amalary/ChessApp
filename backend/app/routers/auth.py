@@ -160,7 +160,8 @@ def _normalize_auth0_domain(domain: str) -> str:
 
 def _auth0_config() -> dict[str, str] | None:
     domain = _normalize_auth0_domain(
-        os.environ.get("AUTH0_DOMAIN", "") or os.environ.get("AUTH0_ISSUER_BASE_URL", "")
+        os.environ.get("AUTH0_DOMAIN", "")
+        or os.environ.get("AUTH0_ISSUER_BASE_URL", "")
     )
     client_id = os.environ.get("AUTH0_CLIENT_ID", "").strip()
     client_secret = os.environ.get("AUTH0_CLIENT_SECRET", "").strip()
@@ -347,7 +348,8 @@ def _auth0_verify_login(identifier: str, password: str) -> dict:
         error_payload = _json_from_bytes(exc.read())
         error_code = str(error_payload.get("error", "")).strip().lower()
         error_description = str(
-            error_payload.get("error_description", "") or error_payload.get("message", "")
+            error_payload.get("error_description", "")
+            or error_payload.get("message", "")
         ).strip()
         description_lower = error_description.lower()
 
@@ -363,9 +365,9 @@ def _auth0_verify_login(identifier: str, password: str) -> dict:
                 payload = _auth0_token_exchange(password_payload, config["domain"])
             except urllib_error.HTTPError as fallback_exc:
                 fallback_error_payload = _json_from_bytes(fallback_exc.read())
-                fallback_error_code = str(
-                    fallback_error_payload.get("error", "")
-                ).strip().lower()
+                fallback_error_code = (
+                    str(fallback_error_payload.get("error", "")).strip().lower()
+                )
                 fallback_error_description = str(
                     fallback_error_payload.get("error_description", "")
                     or fallback_error_payload.get("message", "")
@@ -391,7 +393,8 @@ def _auth0_verify_login(identifier: str, password: str) -> dict:
                     ) from fallback_exc
                 raise HTTPException(
                     status_code=502,
-                    detail=fallback_error_description or AUTH0_UPSTREAM_UNAVAILABLE_DETAIL,
+                    detail=fallback_error_description
+                    or AUTH0_UPSTREAM_UNAVAILABLE_DETAIL,
                 ) from fallback_exc
             except urllib_error.URLError as fallback_exc:
                 raise HTTPException(
@@ -637,7 +640,9 @@ def _build_local_username_from_auth0(
     suffix = 1
     while True:
         exists = db.execute(
-            select(LocalAuthUser).where(func.lower(LocalAuthUser.username) == probe.lower())
+            select(LocalAuthUser).where(
+                func.lower(LocalAuthUser.username) == probe.lower()
+            )
         ).scalar_one_or_none()
         if exists is None:
             return probe
@@ -881,11 +886,15 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         else:
             # Optional local fallback for dev/recovery flows only.
             if not local_fallback_enabled:
-                raise HTTPException(status_code=401, detail="Invalid username or password.")
+                raise HTTPException(
+                    status_code=401, detail="Invalid username or password."
+                )
             if local_user is None or not verify_password(
                 payload.password, local_user.password_hash
             ):
-                raise HTTPException(status_code=401, detail="Invalid username or password.")
+                raise HTTPException(
+                    status_code=401, detail="Invalid username or password."
+                )
             user = _finalize_existing_local_login(db, local_user, payload.password)
 
         return AuthResponse(

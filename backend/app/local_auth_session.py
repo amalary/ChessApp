@@ -27,7 +27,10 @@ def _get_local_auth_session_secret() -> str:
                     stacklevel=2,
                 )
                 _HAS_EMITTED_SECRET_WARNING = True
-            if len(value) < LOCAL_AUTH_MIN_SECRET_LENGTH and not _HAS_EMITTED_SECRET_WARNING:
+            if (
+                len(value) < LOCAL_AUTH_MIN_SECRET_LENGTH
+                and not _HAS_EMITTED_SECRET_WARNING
+            ):
                 warnings.warn(
                     "Local auth session secret is shorter than 32 characters. "
                     "Use a 32+ character LOCAL_AUTH_SESSION_SECRET in production.",

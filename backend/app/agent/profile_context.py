@@ -114,9 +114,7 @@ def _format_difficulty_range(value: Any) -> str | None:
             return f"{min_text}+"
         if max_text:
             return f"up to {max_text}"
-    elif isinstance(value, Sequence) and not isinstance(
-        value, (str, bytes, bytearray)
-    ):
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         parts = _normalize_string_list(value)
         if len(parts) >= 2:
             return f"{parts[0]}-{parts[1]}"

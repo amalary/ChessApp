@@ -557,9 +557,7 @@ def _score_solution_alignment(item: dict, answer_move_tokens: set[str]) -> int:
         if not isinstance(line, str):
             continue
         line_tokens.extend(
-            token.strip()
-            for token in MOVE_TOKEN_PATTERN.findall(line)
-            if token.strip()
+            token.strip() for token in MOVE_TOKEN_PATTERN.findall(line) if token.strip()
         )
     if not line_tokens:
         return 0
@@ -592,7 +590,11 @@ def _resolve_referenced_history_id(
     )
     if selected is not None:
         selected_id = selected.get("id")
-        return selected_id if isinstance(selected_id, str) and selected_id.strip() else None
+        return (
+            selected_id
+            if isinstance(selected_id, str) and selected_id.strip()
+            else None
+        )
 
     answer_move_tokens = _extract_move_tokens(answer)
     if not answer_move_tokens:
@@ -782,9 +784,14 @@ def _build_direct_history_answer(
     items = _normalize_history_items(history)
     if not items:
         return (
-            "I cannot see solved puzzle history in this chat context yet. "
-            "Solve one in the Solver, then ask again from Dashboard Agent."
-        ), None, None, None
+            (
+                "I cannot see solved puzzle history in this chat context yet. "
+                "Solve one in the Solver, then ask again from Dashboard Agent."
+            ),
+            None,
+            None,
+            None,
+        )
 
     selected = (
         _select_history_item_by_query(
@@ -882,7 +889,9 @@ def _build_direct_history_answer(
         selected_mate_line = selected.get("solutionLines")
         if isinstance(selected_mate_line, list) and selected_mate_line:
             compact_line = " | ".join(
-                str(line).strip() for line in selected_mate_line[:3] if str(line).strip()
+                str(line).strip()
+                for line in selected_mate_line[:3]
+                if str(line).strip()
             )
             if compact_line:
                 parts.append(f"Stored solution line(s): {compact_line}.")

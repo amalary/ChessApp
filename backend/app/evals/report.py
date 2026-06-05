@@ -105,7 +105,11 @@ def _extract_checks(record: dict[str, Any]) -> dict[str, tuple[bool, str | None]
         if isinstance(container, list):
             for item in container:
                 if isinstance(item, dict):
-                    add(str(item.get("name", "")), item.get("passed"), item.get("comment"))
+                    add(
+                        str(item.get("name", "")),
+                        item.get("passed"),
+                        item.get("comment"),
+                    )
         elif isinstance(container, dict):
             for name, result in container.items():
                 if isinstance(result, dict):
@@ -141,7 +145,9 @@ def _first_int(source: dict[str, Any], keys: tuple[str, ...]) -> int | None:
     return int(value)
 
 
-def _extract_passed(record: dict[str, Any], checks: dict[str, tuple[bool, str | None]]) -> bool | None:
+def _extract_passed(
+    record: dict[str, Any], checks: dict[str, tuple[bool, str | None]]
+) -> bool | None:
     for key in ("passed", "success", "all_passed", "all_checks_passed"):
         if key in record:
             parsed = _as_bool(record.get(key))
@@ -151,7 +157,11 @@ def _extract_passed(record: dict[str, Any], checks: dict[str, tuple[bool, str | 
     if checks:
         return all(passed for passed, _ in checks.values())
 
-    if record.get("error") or record.get("error_message") or record.get("failure_reason"):
+    if (
+        record.get("error")
+        or record.get("error_message")
+        or record.get("failure_reason")
+    ):
         return False
     return None
 
@@ -172,7 +182,9 @@ def _extract_judge_score(record: dict[str, Any]) -> float | None:
     )
 
 
-def _metric_from_checks(records: list[dict[str, Any]], aliases: tuple[str, ...], label: str) -> AccuracyMetric:
+def _metric_from_checks(
+    records: list[dict[str, Any]], aliases: tuple[str, ...], label: str
+) -> AccuracyMetric:
     alias_set = {alias.lower() for alias in aliases}
     passed = 0
     total = 0
@@ -191,7 +203,9 @@ def _metric_from_checks(records: list[dict[str, Any]], aliases: tuple[str, ...],
     return AccuracyMetric(label=label, passed=passed, total=total)
 
 
-def _collect_failure_reasons(records: list[dict[str, Any]], passed_values: list[bool | None]) -> Counter[str]:
+def _collect_failure_reasons(
+    records: list[dict[str, Any]], passed_values: list[bool | None]
+) -> Counter[str]:
     counts: Counter[str] = Counter()
 
     for record, passed in zip(records, passed_values):
@@ -242,7 +256,11 @@ def _render_console_report(
 ) -> str:
     avg_score = "N/A" if avg_judge_score is None else f"{avg_judge_score:.4f}"
     top_reasons = failure_reasons.most_common(5)
-    reason_lines = ["none"] if not top_reasons else [f"- {reason} ({count})" for reason, count in top_reasons]
+    reason_lines = (
+        ["none"]
+        if not top_reasons
+        else [f"- {reason} ({count})" for reason, count in top_reasons]
+    )
 
     return "\n".join(
         [
@@ -300,7 +318,12 @@ def _render_markdown_report(
     lines.append("")
     lines.append("## Common Failure Reasons")
     if failure_reasons:
-        lines.extend([f"- {reason} ({count})" for reason, count in failure_reasons.most_common(10)])
+        lines.extend(
+            [
+                f"- {reason} ({count})"
+                for reason, count in failure_reasons.most_common(10)
+            ]
+        )
     else:
         lines.append("- none")
     lines.append("")
@@ -311,14 +334,23 @@ def generate_report(summary_path: Path, results_path: Path, output_path: Path) -
     summary = _read_json(summary_path)
     records = _read_jsonl(results_path)
 
-    passed_values = [_extract_passed(record, _extract_checks(record)) for record in records]
+    passed_values = [
+        _extract_passed(record, _extract_checks(record)) for record in records
+    ]
     total_examples = len(records)
     passed_examples = sum(1 for value in passed_values if value is True)
     failed_examples = sum(1 for value in passed_values if value is False)
 
-    summary_total = _first_int(summary, ("total_examples", "total_cases", "total", "num_examples", "example_count"))
-    summary_passed = _first_int(summary, ("passed_examples", "passed", "num_passed", "passed_count"))
-    summary_failed = _first_int(summary, ("failed_examples", "failed", "num_failed", "failed_count"))
+    summary_total = _first_int(
+        summary,
+        ("total_examples", "total_cases", "total", "num_examples", "example_count"),
+    )
+    summary_passed = _first_int(
+        summary, ("passed_examples", "passed", "num_passed", "passed_count")
+    )
+    summary_failed = _first_int(
+        summary, ("failed_examples", "failed", "num_failed", "failed_count")
+    )
 
     if total_examples == 0 and summary_total is not None:
         total_examples = summary_total
@@ -329,12 +361,21 @@ def generate_report(summary_path: Path, results_path: Path, output_path: Path) -
     if failed_examples == 0 and total_examples >= passed_examples:
         failed_examples = total_examples - passed_examples
 
-    judge_values = [score for score in (_extract_judge_score(record) for record in records) if score is not None]
+    judge_values = [
+        score
+        for score in (_extract_judge_score(record) for record in records)
+        if score is not None
+    ]
     avg_judge_score = (sum(judge_values) / len(judge_values)) if judge_values else None
     if avg_judge_score is None:
         avg_judge_score = _first_number(
             summary,
-            ("average_openai_judge_score", "avg_openai_judge_score", "openai_judge_average_score", "average_judge_score"),
+            (
+                "average_openai_judge_score",
+                "avg_openai_judge_score",
+                "openai_judge_average_score",
+                "average_judge_score",
+            ),
         )
 
     fen_metric = _metric_from_checks(
@@ -389,8 +430,18 @@ def parse_args() -> argparse.Namespace:
     reports_dir = evals_dir / "reports"
 
     parser = argparse.ArgumentParser(description="Generate a local chess eval report.")
-    parser.add_argument("--summary-path", type=Path, default=Path("eval_summary.json"), help="Path to eval_summary.json")
-    parser.add_argument("--results-path", type=Path, default=Path("eval_results.jsonl"), help="Path to eval_results.jsonl")
+    parser.add_argument(
+        "--summary-path",
+        type=Path,
+        default=Path("eval_summary.json"),
+        help="Path to eval_summary.json",
+    )
+    parser.add_argument(
+        "--results-path",
+        type=Path,
+        default=Path("eval_results.jsonl"),
+        help="Path to eval_results.jsonl",
+    )
     parser.add_argument(
         "--output-path",
         type=Path,

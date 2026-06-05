@@ -167,7 +167,9 @@ def client_ip(request: Request) -> str:
                 ipaddress.ip_address(first_hop)
                 return first_hop
             except ValueError:
-                logger.warning("Ignoring malformed X-Forwarded-For value: %s", first_hop)
+                logger.warning(
+                    "Ignoring malformed X-Forwarded-For value: %s", first_hop
+                )
     if remote_ip:
         return remote_ip
     return "127.0.0.1"
@@ -462,7 +464,9 @@ class EngineLock:
             redis_client=self._redis,
             key=self._key,
             value=self._value,
-            ttl_seconds=_env_int("SOLVE_ENGINE_LOCK_TTL_SECONDS", ENGINE_LOCK_TTL_SECONDS),
+            ttl_seconds=_env_int(
+                "SOLVE_ENGINE_LOCK_TTL_SECONDS", ENGINE_LOCK_TTL_SECONDS
+            ),
         )
         if not acquired:
             _log_block(reason="engine_lock_busy", request=request, actor=self._actor)

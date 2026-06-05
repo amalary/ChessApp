@@ -145,7 +145,10 @@ def _render_within_budget(
     config: ConversationMemoryConfig,
 ) -> str:
     current = [
-        {"role": item["role"], "text": _truncate_message(item["text"], config.max_chars_per_message)}
+        {
+            "role": item["role"],
+            "text": _truncate_message(item["text"], config.max_chars_per_message),
+        }
         for item in selected
     ]
 
@@ -188,9 +191,15 @@ def build_recent_conversation_context(messages: Any) -> str:
         return "RECENT CONVERSATION:\n(No recent conversation.)"
 
     recent_window = normalized[-config.max_messages :]
-    if len(recent_window) < config.min_messages and len(normalized) > len(recent_window):
+    if len(recent_window) < config.min_messages and len(normalized) > len(
+        recent_window
+    ):
         needed = config.min_messages - len(recent_window)
-        prefix = normalized[max(0, len(normalized) - config.max_messages - needed) : -config.max_messages]
+        prefix = normalized[
+            max(
+                0, len(normalized) - config.max_messages - needed
+            ) : -config.max_messages
+        ]
         recent_window = [*prefix, *recent_window]
 
     puzzle_turns = [

@@ -110,7 +110,9 @@ def _enforce_section_limit(text: str, max_chars: int) -> str:
     return _truncate(clean, max_chars)
 
 
-def _first_non_empty(value: Any, keys: Sequence[str], nested_fields: Sequence[str]) -> Any:
+def _first_non_empty(
+    value: Any, keys: Sequence[str], nested_fields: Sequence[str]
+) -> Any:
     for source in _candidate_sources(value, nested_fields):
         for key in keys:
             found = _safe_get_value(source, key)
@@ -191,7 +193,9 @@ def _extract_engine_analysis(puzzle: Any, limits: ContextBuilderLimits) -> str:
             if text:
                 rows.append(f"{key}: {text}")
         if rows:
-            return _enforce_section_limit("\n".join(rows), limits.max_engine_analysis_chars)
+            return _enforce_section_limit(
+                "\n".join(rows), limits.max_engine_analysis_chars
+            )
 
     if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
         as_lines = _normalize_string_list(raw)
@@ -199,7 +203,10 @@ def _extract_engine_analysis(puzzle: Any, limits: ContextBuilderLimits) -> str:
         if text:
             return _enforce_section_limit(text, limits.max_engine_analysis_chars)
 
-    return _enforce_section_limit(_clean_text(raw), limits.max_engine_analysis_chars) or "(No engine analysis provided.)"
+    return (
+        _enforce_section_limit(_clean_text(raw), limits.max_engine_analysis_chars)
+        or "(No engine analysis provided.)"
+    )
 
 
 def _extract_doc_chunks_from_source(source: Any) -> list[dict[str, str]]:
@@ -210,7 +217,9 @@ def _extract_doc_chunks_from_source(source: Any) -> list[dict[str, str]]:
     normalized: list[Any] = []
     if isinstance(source, Mapping):
         normalized = [source]
-    elif isinstance(source, Sequence) and not isinstance(source, (str, bytes, bytearray)):
+    elif isinstance(source, Sequence) and not isinstance(
+        source, (str, bytes, bytearray)
+    ):
         normalized = [item for item in source]
     else:
         return chunks
@@ -294,7 +303,10 @@ def _extract_retrieved_documentation(
         rows.append(f"[{idx}] source={source_label}")
         rows.append(chunk_text)
 
-    return _enforce_section_limit("\n".join(rows), limits.max_docs_chars) or _DEFAULT_EMPTY_DOCS
+    return (
+        _enforce_section_limit("\n".join(rows), limits.max_docs_chars)
+        or _DEFAULT_EMPTY_DOCS
+    )
 
 
 def _is_private_field_name(field_name: str) -> bool:
@@ -422,7 +434,10 @@ def _compose_context_sections(
     }
 
     for idx, (name, body) in enumerate(mutable_sections):
-        if len("\n\n".join(f"{n}:\n{b}" for n, b in mutable_sections)) <= limits.max_total_chars:
+        if (
+            len("\n\n".join(f"{n}:\n{b}" for n, b in mutable_sections))
+            <= limits.max_total_chars
+        ):
             break
         if name not in trim_order:
             continue

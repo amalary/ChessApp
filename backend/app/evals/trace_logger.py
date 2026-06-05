@@ -60,10 +60,7 @@ def _sanitize(value: Any, *, key_hint: str | None = None) -> Any:
     if isinstance(value, str):
         return _redact_string(value)
     if isinstance(value, dict):
-        return {
-            str(k): _sanitize(v, key_hint=str(k))
-            for k, v in value.items()
-        }
+        return {str(k): _sanitize(v, key_hint=str(k)) for k, v in value.items()}
     if isinstance(value, (list, tuple, set)):
         return [_sanitize(item) for item in value]
     return value
@@ -114,4 +111,3 @@ def log_solve_trace(**trace_fields: Any) -> None:
                 handle.write(payload + "\n")
     except Exception:
         logger.exception("Failed to persist solve trace.")
-

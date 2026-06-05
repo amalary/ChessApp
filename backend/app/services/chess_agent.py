@@ -792,9 +792,9 @@ class ChessAssistantAgent:
             if first_move_total > 0
             else None
         )
-        latest_rating = latest_reference.get("difficultyRating") or latest_reference.get(
-            "puzzleElo"
-        )
+        latest_rating = latest_reference.get(
+            "difficultyRating"
+        ) or latest_reference.get("puzzleElo")
         latest_rating_text = (
             str(latest_rating) if isinstance(latest_rating, int) else "unavailable"
         )
@@ -863,7 +863,9 @@ class ChessAssistantAgent:
                 break
 
         if isinstance(raw, list):
-            return [move.strip() for move in raw if isinstance(move, str) and move.strip()]
+            return [
+                move.strip() for move in raw if isinstance(move, str) and move.strip()
+            ]
 
         if isinstance(raw, str) and raw.strip():
             return [token.strip() for token in raw.split() if token.strip()]
