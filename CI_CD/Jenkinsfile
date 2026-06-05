@@ -102,11 +102,11 @@ stage('Lint: Frontend') {
             --name "${CONTAINER_NAME}" \
             -e PORT=8080 \
             -e REDIS_URL="redis://${REDIS_IP}:6379/0" \
-            -p 8080:8080 \
+            -p 18080:8080 \
             "${DOCKERHUB_USR}/puzzle-backend:latest"
 
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/; then
+            if curl -fsS http://127.0.0.1:18080/; then
               exit 0
             fi
             sleep 1
