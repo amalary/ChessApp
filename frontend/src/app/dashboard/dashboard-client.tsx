@@ -65,6 +65,13 @@ const NAV_ITEMS: NavItem[] = [
 type MobileNavKey = 'home' | 'solve' | 'training' | 'profile';
 
 const RANGE_TABS = ['Today', 'Week', 'Month', 'Year'] as const;
+const DASHBOARD_PUZZLE_ELO_RANGES = ['7 Days', '30 Days', '90 Days', 'All Time'] as const;
+const DASHBOARD_PUZZLE_ELO_CATEGORIES = [
+  { id: 'overall', label: 'Overall', mateIn: null },
+  { id: 'mate-in-1', label: 'Mate in 1', mateIn: 1 },
+  { id: 'mate-in-2', label: 'Mate in 2', mateIn: 2 },
+  { id: 'mate-in-3', label: 'Mate in 3', mateIn: 3 },
+] as const;
 const ANALYTICS_THEMES = ['Forks', 'Pins', 'Back-Rank Mates', 'Sacrifices', 'Skewers'] as const;
 const ANALYTICS_BASELINE_ACCURACY: Record<(typeof ANALYTICS_THEMES)[number], number> = {
   Forks: 85,
@@ -120,6 +127,8 @@ const GRADIENT_DIRECTIONS = [
 ] as const;
 
 type ActivityRange = (typeof RANGE_TABS)[number];
+type DashboardPuzzleEloRange = (typeof DASHBOARD_PUZZLE_ELO_RANGES)[number];
+type DashboardPuzzleEloCategory = (typeof DASHBOARD_PUZZLE_ELO_CATEGORIES)[number]['id'];
 type AnalyticsSecondarySubsection = (typeof ANALYTICS_SECONDARY_SUBSECTIONS)[number];
 type PuzzleActivityData = {
   values: number[];
@@ -131,6 +140,47 @@ type EloTrendData = {
   values: number[];
   axisLabels: string[];
   subtitle: string;
+};
+
+type DashboardPuzzleEloSummary = {
+  currentElo: number | null;
+  bestElo: number | null;
+  eloChangeLast7Days: number | null;
+  eloChangeThisMonth: number | null;
+  currentPuzzleStreak: number;
+  weeklyAccuracyChange: number | null;
+  strongestGainCategory: string | null;
+  currentStreakDays: number;
+  longestStreakDays: number;
+};
+
+type DashboardPuzzleEloProgressData = EloTrendData & {
+  summary: DashboardPuzzleEloSummary;
+  dataPointCount: number;
+  insights: string[];
+};
+
+type DashboardPuzzleEloAnalyticsEvent =
+  | 'Puzzle Elo Graph Viewed'
+  | 'Time Filter Changed'
+  | 'Category Filter Changed'
+  | 'New Personal Best Reached';
+
+type DashboardPuzzleEloAnalyticsPayload = {
+  eventName: DashboardPuzzleEloAnalyticsEvent;
+  range: DashboardPuzzleEloRange;
+  category: DashboardPuzzleEloCategory;
+  currentElo: number | null;
+  bestElo: number | null;
+  dataPointCount: number;
+};
+
+type DashboardPuzzleEloSummaryCard = {
+  label: string;
+  value: string;
+  meta: string;
+  priority?: boolean;
+  valueClassName?: string;
 };
 
 type AccuracyTrendData = {
@@ -939,6 +989,334 @@ function fillMissingWithNearest(values: Array<number | null>, fallback: number):
   return next.map((value) => Math.round(value ?? fallback));
 }
 
+function resolveDashboardPuzzleEloCategoryLabel(category: DashboardPuzzleEloCategory): string {
+  return DASHBOARD_PUZZLE_ELO_CATEGORIES.find((option) => option.id === category)?.label ?? 'Overall';
+}
+
+function filterDashboardPuzzleEloSubmissions(
+  submissions: PuzzleSubmissionRecord[],
+  category: DashboardPuzzleEloCategory,
+): PuzzleSubmissionRecord[] {
+  const option = DASHBOARD_PUZZLE_ELO_CATEGORIES.find((item) => item.id === category);
+  if (!option || option.mateIn === null) {
+    return submissions;
+  }
+  return submissions.filter((submission) => submission.positionCheck.mateIn === option.mateIn);
+}
+
+function buildDashboardPuzzleAccuracyChange(
+  submissions: PuzzleSubmissionRecord[],
+  todayStart: Date,
+): number | null {
+  const thisWeekStart = new Date(todayStart.getTime() - 6 * DAY_MS);
+  const previousWeekStart = new Date(todayStart.getTime() - 13 * DAY_MS);
+  const buildAccuracy = (start: Date, end: Date) => {
+    const assessments = submissions
+      .filter((submission) => {
+        const submittedAt = new Date(submission.submittedAt);
+        return (
+          !Number.isNaN(submittedAt.getTime()) &&
+          submittedAt.getTime() >= start.getTime() &&
+          submittedAt.getTime() < end.getTime() &&
+          submission.firstMoveAssessment?.isValidForFirstMoveAccuracy === true
+        );
+      })
+      .map((submission) => submission.firstMoveAssessment);
+
+    if (assessments.length === 0) {
+      return null;
+    }
+
+    const correctCount = assessments.filter((assessment) => assessment?.isFirstMoveCorrect === true).length;
+    return Math.round((correctCount / assessments.length) * 100);
+  };
+  const thisWeekAccuracy = buildAccuracy(thisWeekStart, new Date(todayStart.getTime() + DAY_MS));
+  const previousWeekAccuracy = buildAccuracy(previousWeekStart, thisWeekStart);
+
+  return thisWeekAccuracy !== null && previousWeekAccuracy !== null
+    ? thisWeekAccuracy - previousWeekAccuracy
+    : null;
+}
+
+function buildDashboardPuzzleCurrentStreak(submissions: PuzzleSubmissionRecord[]): number {
+  const sortedSubmissions = [...submissions]
+    .filter((submission) => submission.firstMoveAssessment?.isValidForFirstMoveAccuracy === true)
+    .sort((a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt));
+
+  let streak = 0;
+  for (const submission of sortedSubmissions) {
+    if (submission.firstMoveAssessment?.isFirstMoveCorrect !== true) {
+      break;
+    }
+    streak += 1;
+  }
+
+  return streak;
+}
+
+function buildDashboardPuzzleStrongestGainCategory(
+  submissions: PuzzleSubmissionRecord[],
+  todayStart: Date,
+): string | null {
+  const monthStart = new Date(todayStart.getFullYear(), todayStart.getMonth(), 1);
+  const gains = DASHBOARD_PUZZLE_ELO_CATEGORIES.filter((option) => option.mateIn !== null).map((option) => {
+    const entries = submissions
+      .filter((submission) => submission.positionCheck.mateIn === option.mateIn)
+      .map((submission) => ({
+        submittedAt: new Date(submission.submittedAt),
+        elo: resolveSubmissionElo(submission),
+      }))
+      .filter(
+        (entry) =>
+          !Number.isNaN(entry.submittedAt.getTime()) &&
+          entry.submittedAt.getTime() >= monthStart.getTime(),
+      )
+      .sort((a, b) => a.submittedAt.getTime() - b.submittedAt.getTime());
+    let gain = 0;
+    for (let idx = 1; idx < entries.length; idx += 1) {
+      gain += Math.max(0, entries[idx].elo - entries[idx - 1].elo);
+    }
+    return { label: option.label, gain };
+  });
+  const strongest = gains.sort((a, b) => b.gain - a.gain)[0];
+  return strongest && strongest.gain > 0 ? strongest.label : null;
+}
+
+function buildDashboardPuzzleEloSummary(
+  entries: Array<{ submittedAt: Date; elo: number }>,
+  submissions: PuzzleSubmissionRecord[],
+  todayStart: Date,
+): DashboardPuzzleEloSummary {
+  const validEntries = entries
+    .filter((entry) => !Number.isNaN(entry.submittedAt.getTime()))
+    .sort((a, b) => a.submittedAt.getTime() - b.submittedAt.getTime());
+  const weeklyAccuracyChange = buildDashboardPuzzleAccuracyChange(submissions, todayStart);
+  const currentPuzzleStreak = buildDashboardPuzzleCurrentStreak(submissions);
+  const strongestGainCategory = buildDashboardPuzzleStrongestGainCategory(submissions, todayStart);
+
+  if (validEntries.length === 0) {
+    return {
+      currentElo: null,
+      bestElo: null,
+      eloChangeLast7Days: null,
+      eloChangeThisMonth: null,
+      currentPuzzleStreak,
+      weeklyAccuracyChange,
+      strongestGainCategory,
+      currentStreakDays: 0,
+      longestStreakDays: 0,
+    };
+  }
+
+  const currentElo = validEntries[validEntries.length - 1].elo;
+  const bestElo = Math.max(...validEntries.map((entry) => entry.elo));
+  const sevenDayStart = new Date(todayStart.getTime() - 6 * DAY_MS);
+  const firstRecentEntry = validEntries.find(
+    (entry) => entry.submittedAt.getTime() >= sevenDayStart.getTime(),
+  );
+  const eloChangeLast7Days = firstRecentEntry ? currentElo - firstRecentEntry.elo : null;
+  const monthStart = new Date(todayStart.getFullYear(), todayStart.getMonth(), 1);
+  const firstMonthlyEntry = validEntries.find(
+    (entry) => entry.submittedAt.getTime() >= monthStart.getTime(),
+  );
+  const eloChangeThisMonth = firstMonthlyEntry ? currentElo - firstMonthlyEntry.elo : null;
+  const solvedDayKeys = new Set(
+    validEntries.map((entry) => {
+      const day = new Date(
+        entry.submittedAt.getFullYear(),
+        entry.submittedAt.getMonth(),
+        entry.submittedAt.getDate(),
+      );
+      return Math.floor(day.getTime() / DAY_MS);
+    }),
+  );
+  const sortedDayKeys = Array.from(solvedDayKeys).sort((a, b) => a - b);
+  let longestStreakDays = 0;
+  let runningStreakDays = 0;
+  let previousDayKey: number | null = null;
+
+  sortedDayKeys.forEach((dayKey) => {
+    runningStreakDays = previousDayKey !== null && dayKey === previousDayKey + 1 ? runningStreakDays + 1 : 1;
+    longestStreakDays = Math.max(longestStreakDays, runningStreakDays);
+    previousDayKey = dayKey;
+  });
+
+  const todayKey = Math.floor(todayStart.getTime() / DAY_MS);
+  let currentStreakDays = 0;
+  for (let dayKey = todayKey; solvedDayKeys.has(dayKey); dayKey -= 1) {
+    currentStreakDays += 1;
+  }
+
+  return {
+    currentElo,
+    bestElo,
+    eloChangeLast7Days,
+    eloChangeThisMonth,
+    currentPuzzleStreak,
+    weeklyAccuracyChange,
+    strongestGainCategory,
+    currentStreakDays,
+    longestStreakDays,
+  };
+}
+
+function buildDashboardPuzzleEloInsights(
+  summary: DashboardPuzzleEloSummary,
+  category: DashboardPuzzleEloCategory,
+): string[] {
+  const insights: string[] = [];
+  const categoryLabel = resolveDashboardPuzzleEloCategoryLabel(category);
+  const categoryPrefix = category === 'overall' ? 'Your rating' : `Your ${categoryLabel} rating`;
+
+  if (summary.eloChangeThisMonth !== null && summary.eloChangeThisMonth !== 0) {
+    insights.push(
+      `${categoryPrefix} ${summary.eloChangeThisMonth > 0 ? 'increased' : 'decreased'} ${Math.abs(
+        summary.eloChangeThisMonth,
+      )} points this month.`,
+    );
+  }
+
+  if (category === 'overall' && summary.strongestGainCategory) {
+    insights.push(`Most gains came from ${summary.strongestGainCategory} puzzles.`);
+  }
+
+  if (summary.currentPuzzleStreak > 1) {
+    insights.push(`You're currently on a ${summary.currentPuzzleStreak}-puzzle first-move streak.`);
+  }
+
+  if (summary.weeklyAccuracyChange !== null && summary.weeklyAccuracyChange !== 0) {
+    insights.push(
+      `Your accuracy ${summary.weeklyAccuracyChange > 0 ? 'improved' : 'dropped'} ${Math.abs(
+        summary.weeklyAccuracyChange,
+      )} points this week.`,
+    );
+  }
+
+  if (insights.length === 0 && summary.eloChangeLast7Days !== null && summary.eloChangeLast7Days !== 0) {
+    insights.push(
+      `${categoryPrefix} ${summary.eloChangeLast7Days > 0 ? 'gained' : 'lost'} ${Math.abs(
+        summary.eloChangeLast7Days,
+      )} points over the last 7 days.`,
+    );
+  }
+
+  return insights.slice(0, 4);
+}
+
+function buildDashboardPuzzleEloProgressData(
+  activeRange: DashboardPuzzleEloRange,
+  submissions: PuzzleSubmissionRecord[],
+  category: DashboardPuzzleEloCategory,
+): DashboardPuzzleEloProgressData {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const monthDayFormatter = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+  const monthFormatter = new Intl.DateTimeFormat(undefined, { month: 'short' });
+  const filteredSubmissions = filterDashboardPuzzleEloSubmissions(submissions, category);
+  const categoryLabel = resolveDashboardPuzzleEloCategoryLabel(category);
+  const eloEntries = filteredSubmissions.map((submission) => ({
+    submittedAt: new Date(submission.submittedAt),
+    elo: resolveSubmissionElo(submission),
+  }));
+  const summary = buildDashboardPuzzleEloSummary(eloEntries, filteredSubmissions, todayStart);
+  const insights = buildDashboardPuzzleEloInsights(summary, category);
+  const validEntries = eloEntries.filter((entry) => !Number.isNaN(entry.submittedAt.getTime()));
+  const globalFallback = summary.currentElo ?? 900;
+
+  if (validEntries.length === 0) {
+    return {
+      values: [],
+      axisLabels: [],
+      subtitle:
+        activeRange === 'All Time'
+          ? `Estimated puzzle Elo across ${categoryLabel.toLowerCase()} submissions`
+          : `Daily average estimated Elo over the last ${
+              activeRange === '7 Days' ? 7 : activeRange === '30 Days' ? 30 : 90
+            } days for ${categoryLabel.toLowerCase()}`,
+      summary,
+      dataPointCount: 0,
+      insights,
+    };
+  }
+
+  if (activeRange === 'All Time') {
+    const sortedEntries = [...validEntries].sort(
+      (a, b) => a.submittedAt.getTime() - b.submittedAt.getTime(),
+    );
+    const firstEntry = sortedEntries[0];
+    const lastEntry = sortedEntries[sortedEntries.length - 1];
+    const startMonth = new Date(firstEntry.submittedAt.getFullYear(), firstEntry.submittedAt.getMonth(), 1);
+    const endMonth = new Date(lastEntry.submittedAt.getFullYear(), lastEntry.submittedAt.getMonth(), 1);
+    const monthCount = Math.max(
+      1,
+      (endMonth.getFullYear() - startMonth.getFullYear()) * 12 +
+        (endMonth.getMonth() - startMonth.getMonth()) +
+        1,
+    );
+    const values = Array.from({ length: monthCount }, () => [] as number[]);
+    const labels = Array.from({ length: monthCount }, (_, idx) =>
+      monthFormatter.format(new Date(startMonth.getFullYear(), startMonth.getMonth() + idx, 1)),
+    );
+
+    sortedEntries.forEach((entry) => {
+      const monthIndex =
+        (entry.submittedAt.getFullYear() - startMonth.getFullYear()) * 12 +
+        (entry.submittedAt.getMonth() - startMonth.getMonth());
+      if (monthIndex >= 0 && monthIndex < values.length) {
+        values[monthIndex].push(entry.elo);
+      }
+    });
+
+    return {
+      values: fillMissingWithNearest(
+        values.map((bucket) =>
+          bucket.length > 0 ? bucket.reduce((sum, elo) => sum + elo, 0) / bucket.length : null,
+        ),
+        globalFallback,
+      ),
+      axisLabels: buildEvenlySpacedLabels(labels, 6),
+      subtitle: `Estimated puzzle Elo across ${categoryLabel.toLowerCase()} submissions`,
+      summary,
+      dataPointCount: sortedEntries.length,
+      insights,
+    };
+  }
+
+  const dayCount = activeRange === '7 Days' ? 7 : activeRange === '30 Days' ? 30 : 90;
+  const start = new Date(todayStart.getTime() - (dayCount - 1) * DAY_MS);
+  const values = Array.from({ length: dayCount }, () => [] as number[]);
+  const labels = Array.from({ length: dayCount }, (_, idx) =>
+    monthDayFormatter.format(new Date(start.getTime() + idx * DAY_MS)),
+  );
+
+  validEntries.forEach((entry) => {
+    const submittedDay = new Date(
+      entry.submittedAt.getFullYear(),
+      entry.submittedAt.getMonth(),
+      entry.submittedAt.getDate(),
+    );
+    const dayIndex = Math.floor((submittedDay.getTime() - start.getTime()) / DAY_MS);
+    if (dayIndex >= 0 && dayIndex < values.length) {
+      values[dayIndex].push(entry.elo);
+    }
+  });
+
+  labels[labels.length - 1] = 'Today';
+  return {
+    values: fillMissingWithNearest(
+      values.map((bucket) =>
+        bucket.length > 0 ? bucket.reduce((sum, elo) => sum + elo, 0) / bucket.length : null,
+      ),
+      globalFallback,
+    ),
+    axisLabels: buildEvenlySpacedLabels(labels, activeRange === '7 Days' ? 7 : 6),
+    subtitle: `Daily average estimated Elo over the last ${dayCount} days for ${categoryLabel.toLowerCase()}`,
+    summary,
+    dataPointCount: validEntries.filter((entry) => entry.submittedAt.getTime() >= start.getTime()).length,
+    insights,
+  };
+}
+
 function buildEloTrendData(
   activeRange: ActivityRange,
   submissions: PuzzleSubmissionRecord[],
@@ -1728,6 +2106,475 @@ function AreaChart({
           ))}
         </div>
       </div>
+    </section>
+  );
+}
+
+function formatDashboardPuzzleEloValue(value: number | null): string {
+  return value === null ? 'N/A' : String(value);
+}
+
+function formatDashboardPuzzleEloChange(value: number | null): string {
+  if (value === null) {
+    return 'N/A';
+  }
+  if (value > 0) {
+    return `+${value}`;
+  }
+  return String(value);
+}
+
+function trackDashboardPuzzleEloGraphEvent(payload: DashboardPuzzleEloAnalyticsPayload): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent('dashboard:puzzle-elo-graph:event', {
+      detail: payload,
+    }),
+  );
+}
+
+function PuzzleEloProgressSection({
+  data,
+  activeRange,
+  activeCategory,
+  onRangeChange,
+  onCategoryChange,
+  onSolvePuzzles,
+  sectionStyle,
+  buttonStyle,
+}: {
+  data: DashboardPuzzleEloProgressData;
+  activeRange: DashboardPuzzleEloRange;
+  activeCategory: DashboardPuzzleEloCategory;
+  onRangeChange: (range: DashboardPuzzleEloRange) => void;
+  onCategoryChange: (category: DashboardPuzzleEloCategory) => void;
+  onSolvePuzzles: () => void;
+  sectionStyle?: React.CSSProperties;
+  buttonStyle?: React.CSSProperties;
+}) {
+  const chartId = useId();
+  const viewedRef = useRef(false);
+  const previousBestByCategoryRef = useRef<Partial<Record<DashboardPuzzleEloCategory, number | null>>>({});
+  const { areaPath, linePath } = useMemo(() => buildChartPaths(data.values, 860, 190), [data.values]);
+  const yAxisTicks = useMemo(() => buildYAxisTicks(data.values), [data.values]);
+  const hasValues = data.values.length >= 2 && data.dataPointCount > 1;
+  const maxTick = yAxisTicks.length > 0 ? Math.max(yAxisTicks[0], 0) : 0;
+  const chartMaxValue = Math.max(
+    ...data.values.map((value) =>
+      typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0,
+    ),
+    1,
+  );
+  const chartValueY = (value: number) => {
+    const padTop = 18;
+    const usableHeight = 190 - padTop - 16;
+    const normalizedValue = chartMaxValue > 0 ? clamp(value, 0, chartMaxValue) / chartMaxValue : 0;
+    return 190 - 12 - normalizedValue * usableHeight;
+  };
+  const axisTickY = (tick: number) => {
+    const padTop = 18;
+    const usableHeight = 190 - padTop - 16;
+    const normalizedValue = maxTick > 0 ? tick / maxTick : 0;
+    return 190 - 12 - normalizedValue * usableHeight;
+  };
+  const skillBands = [
+    { label: 'Beginner', from: 0, to: 1000, color: 'rgba(14,165,233,0.08)' },
+    { label: 'Intermediate', from: 1000, to: 1400, color: 'rgba(16,185,129,0.075)' },
+    { label: 'Advanced', from: 1400, to: 1800, color: 'rgba(245,158,11,0.07)' },
+    { label: 'Expert', from: 1800, to: Number.POSITIVE_INFINITY, color: 'rgba(168,85,247,0.065)' },
+  ]
+    .map((band) => {
+      const visibleFrom = clamp(band.from, 0, chartMaxValue);
+      const visibleTo = clamp(Number.isFinite(band.to) ? band.to : chartMaxValue, 0, chartMaxValue);
+      const y = chartValueY(visibleTo);
+      const height = chartValueY(visibleFrom) - y;
+      return { ...band, y, height };
+    })
+    .filter((band) => band.height > 0.5);
+  const achievementMarkers = (() => {
+    const step = data.values.length > 1 ? 860 / (data.values.length - 1) : 0;
+    const majorGainThreshold = 100;
+    const markers: Array<{
+      key: string;
+      type: 'personal-best' | 'big-improvement';
+      x: number;
+      y: number;
+      tooltip: string;
+    }> = [];
+    let bestValue = data.values[0] ?? 0;
+
+    data.values.forEach((value, idx) => {
+      if (idx === 0 || !Number.isFinite(value)) {
+        return;
+      }
+
+      const previousValue = data.values[idx - 1] ?? value;
+      const x = idx * step;
+      const y = chartValueY(value);
+      const isPersonalBest = value > bestValue;
+      const isBigImprovement = value - previousValue >= majorGainThreshold;
+
+      if (isPersonalBest) {
+        markers.push({
+          key: `personal-best-${idx}`,
+          type: 'personal-best',
+          x,
+          y,
+          tooltip: 'New Personal Best',
+        });
+        bestValue = value;
+      }
+
+      if (isBigImprovement) {
+        markers.push({
+          key: `big-improvement-${idx}`,
+          type: 'big-improvement',
+          x,
+          y: y - (isPersonalBest ? 11 : 0),
+          tooltip: 'Big Improvement',
+        });
+      }
+    });
+
+    return markers;
+  })();
+  const analyticsPayload = useMemo(
+    () => ({
+      range: activeRange,
+      category: activeCategory,
+      currentElo: data.summary.currentElo,
+      bestElo: data.summary.bestElo,
+      dataPointCount: data.dataPointCount,
+    }),
+    [
+      activeCategory,
+      activeRange,
+      data.dataPointCount,
+      data.summary.bestElo,
+      data.summary.currentElo,
+    ],
+  );
+  const handleCategoryChange = (category: DashboardPuzzleEloCategory) => {
+    if (category === activeCategory) {
+      return;
+    }
+
+    trackDashboardPuzzleEloGraphEvent({
+      ...analyticsPayload,
+      eventName: 'Category Filter Changed',
+      category,
+    });
+    onCategoryChange(category);
+  };
+  const handleRangeChange = (range: DashboardPuzzleEloRange) => {
+    if (range === activeRange) {
+      return;
+    }
+
+    trackDashboardPuzzleEloGraphEvent({
+      ...analyticsPayload,
+      eventName: 'Time Filter Changed',
+      range,
+    });
+    onRangeChange(range);
+  };
+  useEffect(() => {
+    if (viewedRef.current) {
+      return;
+    }
+
+    viewedRef.current = true;
+    trackDashboardPuzzleEloGraphEvent({
+      ...analyticsPayload,
+      eventName: 'Puzzle Elo Graph Viewed',
+    });
+  }, [analyticsPayload]);
+  useEffect(() => {
+    const previousBest = previousBestByCategoryRef.current[activeCategory];
+    const currentBest = data.summary.bestElo;
+
+    if (previousBest === undefined) {
+      previousBestByCategoryRef.current[activeCategory] = currentBest;
+      return;
+    }
+
+    if (currentBest !== null && previousBest !== null && currentBest > previousBest) {
+      trackDashboardPuzzleEloGraphEvent({
+        ...analyticsPayload,
+        eventName: 'New Personal Best Reached',
+      });
+    }
+
+    previousBestByCategoryRef.current[activeCategory] = currentBest;
+  }, [activeCategory, analyticsPayload, data.summary.bestElo]);
+  const recentChange = data.summary.eloChangeLast7Days;
+  const trendLabel =
+    recentChange === null
+      ? 'Trend unavailable'
+      : recentChange > 0
+        ? 'Improving'
+        : recentChange < 0
+          ? 'Needs attention'
+          : 'Holding steady';
+  const trendClassName =
+    recentChange === null
+      ? 'text-slate-500 dark:text-slate-300'
+      : recentChange > 0
+        ? 'text-emerald-600 dark:text-emerald-300'
+        : recentChange < 0
+          ? 'text-amber-600 dark:text-amber-300'
+          : 'text-slate-600 dark:text-slate-200';
+  const summaryCards: DashboardPuzzleEloSummaryCard[] = [
+    {
+      label: 'Current Elo',
+      value: formatDashboardPuzzleEloValue(data.summary.currentElo),
+      meta: 'Latest solved puzzle estimate',
+      priority: true,
+    },
+    {
+      label: '7-Day Change',
+      value: formatDashboardPuzzleEloChange(data.summary.eloChangeLast7Days),
+      meta: trendLabel,
+      valueClassName: trendClassName,
+    },
+    {
+      label: 'Best Elo',
+      value: formatDashboardPuzzleEloValue(data.summary.bestElo),
+      meta: 'Personal best achievement',
+    },
+    {
+      label: 'Strongest Category',
+      value: data.summary.strongestGainCategory ?? 'N/A',
+      meta: 'Largest rating gain this month',
+    },
+    {
+      label: 'Month Change',
+      value: formatDashboardPuzzleEloChange(data.summary.eloChangeThisMonth),
+      meta: 'Current minus first monthly solve',
+    },
+    {
+      label: 'Solve Streak',
+      value: `${data.summary.currentStreakDays}`,
+      meta: `day${data.summary.currentStreakDays === 1 ? '' : 's'} active`,
+    },
+  ];
+
+  return (
+    <section className="neumo-surface-soft rounded-[26px] p-4 sm:p-5 md:p-7" style={sectionStyle}>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-2xl font-semibold tracking-tight text-slate-700 dark:text-slate-100 sm:text-3xl">
+            Puzzle Elo Progress
+          </h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">{data.subtitle}</p>
+        </div>
+        <div className="grid w-full min-w-0 gap-2 lg:w-auto lg:min-w-[360px]">
+          <div className="grid grid-cols-2 gap-2 rounded-2xl neumo-inset p-1 sm:grid-cols-4 lg:flex lg:flex-wrap">
+            {DASHBOARD_PUZZLE_ELO_CATEGORIES.map((category) => {
+              const isActive = activeCategory === category.id;
+              return (
+                <button
+                  key={category.id}
+                  type="button"
+                  onClick={() => handleCategoryChange(category.id)}
+                  className={`min-h-10 rounded-xl px-2 py-2 text-xs font-semibold transition-all duration-200 sm:px-3 ${
+                    isActive
+                      ? 'neumo-pill text-slate-700 dark:text-slate-100'
+                      : 'text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-100'
+                  }`}
+                  style={isActive ? buttonStyle : undefined}
+                  aria-pressed={isActive}
+                >
+                  {category.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="grid grid-cols-2 gap-2 rounded-2xl neumo-inset p-1 sm:grid-cols-4 lg:flex lg:flex-wrap">
+            {DASHBOARD_PUZZLE_ELO_RANGES.map((range) => {
+              const isActive = activeRange === range;
+              return (
+                <button
+                  key={range}
+                  type="button"
+                  onClick={() => handleRangeChange(range)}
+                  className={`min-h-10 rounded-xl px-2 py-2 text-xs font-semibold transition-all duration-200 sm:px-3 ${
+                    isActive
+                      ? 'neumo-pill text-slate-700 dark:text-slate-100'
+                      : 'text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-100'
+                  }`}
+                  style={isActive ? buttonStyle : undefined}
+                  aria-pressed={isActive}
+                >
+                  {range}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+        {summaryCards.map((card) => (
+          <article
+            key={card.label}
+            className={`neumo-surface-soft min-w-0 rounded-2xl px-3 py-3 sm:px-4 ${
+              card.priority ? 'col-span-2 sm:col-span-1' : ''
+            }`}
+            style={sectionStyle}
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300 sm:text-[11px]">
+              {card.label}
+            </p>
+            <p
+              className={`mt-2 truncate text-xl font-semibold sm:text-2xl ${
+                card.valueClassName ?? 'text-slate-700 dark:text-slate-100'
+              }`}
+              title={card.value}
+            >
+              {card.value}
+            </p>
+            <p className="mt-1 text-xs text-slate-400 dark:text-slate-300">{card.meta}</p>
+          </article>
+        ))}
+      </div>
+
+      {!hasValues ? (
+        <div className="mt-5 rounded-2xl neumo-inset px-4 py-6 text-center sm:px-6 sm:py-8">
+          <p className="mx-auto max-w-sm text-sm font-medium text-slate-600 dark:text-slate-200">
+            Complete a few puzzles to begin tracking your progress.
+          </p>
+          <button
+            type="button"
+            onClick={onSolvePuzzles}
+            className="neumo-pill mt-4 inline-flex min-h-11 items-center justify-center rounded-2xl px-5 py-2.5 text-sm font-semibold text-slate-700 transition-all duration-200 hover:-translate-y-[1px] hover:text-slate-900 hover:shadow-[0_8px_16px_rgba(15,23,42,0.12)] dark:text-slate-100 dark:hover:text-white"
+            style={buttonStyle}
+          >
+            Solve Puzzles
+          </button>
+        </div>
+      ) : (
+        <div className="mt-5 min-w-0">
+          <svg
+            viewBox="-44 0 904 190"
+            className="h-[190px] w-full touch-pan-y sm:h-[170px]"
+            role="img"
+            aria-label="Puzzle Elo Progress area chart"
+          >
+            <title>Puzzle Elo Progress</title>
+            <desc>
+              Estimated puzzle Elo over time, including skill bands, personal best markers, and large
+              improvement markers.
+            </desc>
+            <defs>
+              <linearGradient id={`${chartId}-puzzle-elo-fill`} x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="#ffffff" stopOpacity="0.9" />
+                <stop offset="100%" stopColor="#e9eef6" stopOpacity="0.5" />
+              </linearGradient>
+              <linearGradient id={`${chartId}-puzzle-elo-line`} x1="0" x2="1" y1="0" y2="0">
+                <stop offset="0%" stopColor="#1d4ed8" stopOpacity="0.76" />
+                <stop offset="100%" stopColor="#0891b2" stopOpacity="0.82" />
+              </linearGradient>
+            </defs>
+
+            <g aria-hidden="true">
+              {skillBands.map((band) => (
+                <g key={band.label}>
+                  <rect x="0" y={band.y} width="860" height={band.height} fill={band.color} />
+                  {band.height >= 18 ? (
+                    <text x="846" y={band.y + Math.min(band.height - 5, 14)} textAnchor="end" fill="rgba(100,116,139,0.5)" fontSize="10" fontWeight="600">
+                      {band.label}
+                    </text>
+                  ) : null}
+                </g>
+              ))}
+            </g>
+
+            <g stroke="rgba(148,163,184,0.22)" strokeWidth="1">
+              {yAxisTicks.map((tick, idx) => (
+                <line key={`${tick}-${idx}`} x1="0" y1={axisTickY(tick)} x2="860" y2={axisTickY(tick)} />
+              ))}
+              <line x1="0" y1="18" x2="0" y2="178" />
+            </g>
+            <g fill="rgba(100,116,139,0.78)" fontSize="10">
+              {yAxisTicks.map((tick, idx) => (
+                <text key={`puzzle-elo-y-axis-${tick}-${idx}`} x="-8" y={axisTickY(tick) + 3} textAnchor="end">
+                  {tick}
+                </text>
+              ))}
+            </g>
+
+            <path d={areaPath} fill={`url(#${chartId}-puzzle-elo-fill)`} />
+            <path
+              d={linePath}
+              fill="none"
+              stroke={`url(#${chartId}-puzzle-elo-line)`}
+              strokeWidth="3.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <g>
+              {achievementMarkers.map((marker) =>
+                marker.type === 'personal-best' ? (
+                  <g key={marker.key}>
+                    <circle cx={marker.x} cy={marker.y} r="16" fill="transparent">
+                      <title>{marker.tooltip}</title>
+                    </circle>
+                    <circle
+                      cx={marker.x}
+                      cy={marker.y}
+                      r="5"
+                      fill="#ffffff"
+                      stroke="#0ea5e9"
+                      strokeWidth="2"
+                      pointerEvents="none"
+                    />
+                  </g>
+                ) : (
+                  <g key={marker.key}>
+                    <circle cx={marker.x} cy={marker.y} r="16" fill="transparent">
+                      <title>{marker.tooltip}</title>
+                    </circle>
+                    <path
+                      d={`M ${marker.x} ${marker.y - 5} L ${marker.x - 5} ${marker.y + 5} L ${marker.x + 5} ${marker.y + 5} Z`}
+                      fill="#10b981"
+                      fillOpacity="0.88"
+                      stroke="#ffffff"
+                      strokeWidth="1.5"
+                      strokeLinejoin="round"
+                      pointerEvents="none"
+                    />
+                  </g>
+                ),
+              )}
+            </g>
+          </svg>
+
+          <div className="mt-3 grid grid-flow-col items-center justify-between gap-1 text-[10px] text-slate-500 dark:text-slate-300 sm:gap-2 sm:text-xs">
+            {data.axisLabels.map((label, idx) => (
+              <span key={`${label}-${idx}`} className={`min-w-0 truncate ${idx === data.axisLabels.length - 1 ? 'text-right' : ''}`}>
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {data.insights.length > 0 ? (
+        <div className="mt-5 rounded-2xl neumo-inset px-4 py-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">Insights</p>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            {data.insights.map((insight) => (
+              <p key={insight} className="rounded-xl bg-white/45 px-3 py-2 text-sm font-medium text-slate-600 dark:bg-white/10 dark:text-slate-200">
+                {insight}
+              </p>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -2703,6 +3550,10 @@ function DashboardPageContent() {
   const [hasAuthenticatedSession, setHasAuthenticatedSession] = useState(false);
   const [activeNavLabel, setActiveNavLabel] = useState<string>(initialNavLabel);
   const [activeRange, setActiveRange] = useState<(typeof RANGE_TABS)[number]>('Today');
+  const [dashboardPuzzleEloRange, setDashboardPuzzleEloRange] =
+    useState<DashboardPuzzleEloRange>('7 Days');
+  const [dashboardPuzzleEloCategory, setDashboardPuzzleEloCategory] =
+    useState<DashboardPuzzleEloCategory>('overall');
   const [selectedAnalyticsTheme, setSelectedAnalyticsTheme] = useState<AnalyticsTheme | null>(null);
   const [isAnalyticsSectionsOpen, setIsAnalyticsSectionsOpen] = useState(true);
   const [openAnalyticsSecondarySubsections, setOpenAnalyticsSecondarySubsections] = useState<
@@ -3313,9 +4164,9 @@ function DashboardPageContent() {
     () => buildYAxisTicks(puzzleActivityData.values),
     [puzzleActivityData.values],
   );
-  const eloTrendData = useMemo(
-    () => buildEloTrendData(activeRange, submissions),
-    [activeRange, submissions],
+  const dashboardPuzzleEloProgressData = useMemo(
+    () => buildDashboardPuzzleEloProgressData(dashboardPuzzleEloRange, submissions, dashboardPuzzleEloCategory),
+    [dashboardPuzzleEloCategory, dashboardPuzzleEloRange, submissions],
   );
   const solveTimeValues = submissions
     .map((submission) => submission.solveTimeMs)
@@ -3824,11 +4675,13 @@ function DashboardPageContent() {
                   sectionStyle={dashboardContainerStyle}
                   buttonStyle={dashboardButtonStyle}
                 />
-                <AreaChart
-                  title="Elo Trend"
-                  subtitle={eloTrendData.subtitle}
-                  values={eloTrendData.values}
-                  axisLabels={eloTrendData.axisLabels}
+                <PuzzleEloProgressSection
+                  data={dashboardPuzzleEloProgressData}
+                  activeRange={dashboardPuzzleEloRange}
+                  activeCategory={dashboardPuzzleEloCategory}
+                  onRangeChange={setDashboardPuzzleEloRange}
+                  onCategoryChange={setDashboardPuzzleEloCategory}
+                  onSolvePuzzles={() => setActiveNavLabel('Puzzle Lab')}
                   sectionStyle={dashboardContainerStyle}
                   buttonStyle={dashboardButtonStyle}
                 />

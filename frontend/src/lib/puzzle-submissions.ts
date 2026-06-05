@@ -1,3 +1,10 @@
+import {
+  buildScopedStorageKey,
+  readScopedStorageValue,
+  resolveUserSettingsScope,
+  writeScopedStorageValue,
+} from './dashboard-theme-settings';
+
 export type SubmissionPositionCheck = {
   sideToMove: 'white' | 'black' | null;
   confidence: number | null;
@@ -44,6 +51,20 @@ const STORAGE_KEY = 'chessapp.puzzle-submissions.v1';
 const SEEN_COUNT_STORAGE_KEY = 'chessapp.puzzle-submissions.seen-count.v1';
 const UPDATE_EVENT = 'chessapp:puzzle-submissions-updated';
 const MAX_STORED_SUBMISSIONS = 500;
+
+function resolvePuzzleSubmissionStorageScope(): string | null {
+  return resolveUserSettingsScope(null);
+}
+
+function removeScopedPuzzleSubmissionValue(baseKey: string): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.removeItem(
+    buildScopedStorageKey(baseKey, resolvePuzzleSubmissionStorageScope()),
+  );
+}
 
 function createId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -207,7 +228,7 @@ export function readPuzzleSubmissions(): PuzzleSubmissionRecord[] {
     return [];
   }
 
-  const raw = window.localStorage.getItem(STORAGE_KEY);
+  const raw = readScopedStorageValue(STORAGE_KEY, resolvePuzzleSubmissionStorageScope());
   if (!raw) {
     return [];
   }
@@ -228,7 +249,10 @@ export function getSeenPuzzleSubmissionCount(): number {
     return 0;
   }
 
-  const raw = window.localStorage.getItem(SEEN_COUNT_STORAGE_KEY);
+  const raw = readScopedStorageValue(
+    SEEN_COUNT_STORAGE_KEY,
+    resolvePuzzleSubmissionStorageScope(),
+  );
   if (!raw) {
     return 0;
   }
@@ -258,7 +282,11 @@ export function markPuzzleSubmissionNotificationsSeen(totalSubmissionCount: numb
     return 0;
   }
 
-  window.localStorage.setItem(SEEN_COUNT_STORAGE_KEY, String(normalizedTotal));
+  writeScopedStorageValue(
+    SEEN_COUNT_STORAGE_KEY,
+    resolvePuzzleSubmissionStorageScope(),
+    String(normalizedTotal),
+  );
   emitUpdateEvent();
   return Math.max(0, normalizedTotal - currentSeen);
 }
@@ -282,7 +310,11 @@ export function addPuzzleSubmission(
 
   while (persisted.length > 0) {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+      writeScopedStorageValue(
+        STORAGE_KEY,
+        resolvePuzzleSubmissionStorageScope(),
+        JSON.stringify(persisted),
+      );
       emitUpdateEvent();
       return persisted;
     } catch {
@@ -300,7 +332,7 @@ export function addPuzzleSubmission(
   }
 
   try {
-    window.localStorage.removeItem(STORAGE_KEY);
+    removeScopedPuzzleSubmissionValue(STORAGE_KEY);
   } catch {
     // Ignore storage failures; submissions will be rebuilt from new solves.
   }
@@ -400,7 +432,11 @@ export function replacePuzzleSubmissions(
     .slice(0, MAX_STORED_SUBMISSIONS);
 
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+    writeScopedStorageValue(
+      STORAGE_KEY,
+      resolvePuzzleSubmissionStorageScope(),
+      JSON.stringify(normalized),
+    );
   } catch {
     // Keep local history untouched if storage is unavailable.
     return readPuzzleSubmissions();
