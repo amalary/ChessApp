@@ -1,6 +1,18 @@
 pipeline {
   agent any
 
+  parameters {
+    string(name: 'GCP_PROJECT_ID', defaultValue: '', description: 'Google Cloud project ID, not the numeric project number.')
+    string(name: 'GCP_REGION', defaultValue: 'us-central1', description: 'Cloud Run and Artifact Registry region.')
+    string(name: 'ARTIFACT_REPOSITORY', defaultValue: 'chessapp', description: 'Artifact Registry Docker repository name.')
+    string(name: 'BACKEND_SERVICE', defaultValue: 'chess-backend', description: 'Existing or desired Cloud Run backend service name.')
+    string(name: 'FRONTEND_SERVICE', defaultValue: 'chessapp-frontend', description: 'Existing or desired Cloud Run frontend service name.')
+    string(name: 'BACKEND_BASE_URL', defaultValue: 'https://chess-backend-580461236477.us-central1.run.app', description: 'Public backend URL used by the frontend and CORS.')
+    string(name: 'FRONTEND_BASE_URL', defaultValue: '', description: 'Optional public frontend URL. Leave blank to use the generated Cloud Run URL.')
+    string(name: 'GCP_SERVICE_ACCOUNT_KEY', defaultValue: 'gcp-service-account-key', description: 'Jenkins file credential ID for a Google service account key.')
+    booleanParam(name: 'DEPLOY_TO_CLOUD_RUN', defaultValue: true, description: 'Deploy backend and frontend after pushing images.')
+  }
+
   environment {
     DOCKERHUB = credentials('dockerhub-credentials')
   }
@@ -9,6 +21,32 @@ pipeline {
     stage('Checkout') {
       steps {
         checkout scm
+        script {
+          env.SHORT_SHA = sh(
+            script: 'git rev-parse --short=12 HEAD',
+            returnStdout: true
+          ).trim()
+          env.IMAGE_TAG = "${env.BUILD_NUMBER}-${env.SHORT_SHA}"
+        }
+      }
+    }
+
+    stage('Validate Deployment Settings') {
+      when {
+        expression { return params.DEPLOY_TO_CLOUD_RUN }
+      }
+      steps {
+        script {
+          if (!params.GCP_PROJECT_ID?.trim()) {
+            error('Set the GCP_PROJECT_ID Jenkins parameter before deploying to Cloud Run.')
+          }
+          if (!params.GCP_SERVICE_ACCOUNT_KEY?.trim()) {
+            error('Set the GCP_SERVICE_ACCOUNT_KEY Jenkins parameter before deploying to Cloud Run.')
+          }
+          if (!params.BACKEND_BASE_URL?.trim()) {
+            error('Set BACKEND_BASE_URL to the public backend Cloud Run URL.')
+          }
+        }
       }
     }
 
@@ -46,8 +84,21 @@ stage('Lint: Frontend') {
 
     stage('Build Docker Images') {
       steps {
-        sh 'docker build -t ${DOCKERHUB_USR}/puzzle-frontend:latest ./frontend'
+        sh 'docker build --build-arg BACKEND_URL="${BACKEND_BASE_URL}" --build-arg NEXT_PUBLIC_BACKEND_URL="${BACKEND_BASE_URL}" -t ${DOCKERHUB_USR}/puzzle-frontend:latest ./frontend'
         sh 'docker build -t ${DOCKERHUB_USR}/puzzle-backend:latest ./backend'
+        sh '''
+          set -eu
+          if [ "${DEPLOY_TO_CLOUD_RUN}" != "true" ]; then
+            exit 0
+          fi
+
+          REGISTRY="${GCP_REGION}-docker.pkg.dev"
+          IMAGE_PREFIX="${REGISTRY}/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}"
+          docker tag "${DOCKERHUB_USR}/puzzle-frontend:latest" "${IMAGE_PREFIX}/frontend:${IMAGE_TAG}"
+          docker tag "${DOCKERHUB_USR}/puzzle-frontend:latest" "${IMAGE_PREFIX}/frontend:latest"
+          docker tag "${DOCKERHUB_USR}/puzzle-backend:latest" "${IMAGE_PREFIX}/backend:${IMAGE_TAG}"
+          docker tag "${DOCKERHUB_USR}/puzzle-backend:latest" "${IMAGE_PREFIX}/backend:latest"
+        '''
       }
     }
 
@@ -56,6 +107,83 @@ stage('Lint: Frontend') {
         sh 'echo ${DOCKERHUB_PSW} | docker login -u ${DOCKERHUB_USR} --password-stdin'
         sh 'docker push ${DOCKERHUB_USR}/puzzle-frontend:latest'
         sh 'docker push ${DOCKERHUB_USR}/puzzle-backend:latest'
+      }
+    }
+
+    stage('Push Artifact Registry Images') {
+      when {
+        expression { return params.DEPLOY_TO_CLOUD_RUN }
+      }
+      steps {
+        withCredentials([file(credentialsId: "${params.GCP_SERVICE_ACCOUNT_KEY}", variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+          sh '''
+            set -eu
+            REGISTRY="${GCP_REGION}-docker.pkg.dev"
+            IMAGE_PREFIX="${REGISTRY}/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}"
+
+            gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+            gcloud config set project "${GCP_PROJECT_ID}"
+            gcloud artifacts repositories describe "${ARTIFACT_REPOSITORY}" \
+              --location "${GCP_REGION}" >/dev/null 2>&1 || \
+              gcloud artifacts repositories create "${ARTIFACT_REPOSITORY}" \
+                --repository-format docker \
+                --location "${GCP_REGION}" \
+                --description "ChessApp Docker images"
+            gcloud auth configure-docker "${REGISTRY}" --quiet
+
+            docker push "${IMAGE_PREFIX}/frontend:${IMAGE_TAG}"
+            docker push "${IMAGE_PREFIX}/frontend:latest"
+            docker push "${IMAGE_PREFIX}/backend:${IMAGE_TAG}"
+            docker push "${IMAGE_PREFIX}/backend:latest"
+          '''
+        }
+      }
+    }
+
+    stage('Deploy Cloud Run') {
+      when {
+        expression { return params.DEPLOY_TO_CLOUD_RUN }
+      }
+      steps {
+        withCredentials([file(credentialsId: "${params.GCP_SERVICE_ACCOUNT_KEY}", variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+          sh '''
+            set -eu
+            REGISTRY="${GCP_REGION}-docker.pkg.dev"
+            IMAGE_PREFIX="${REGISTRY}/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}"
+            BACKEND_IMAGE="${IMAGE_PREFIX}/backend:${IMAGE_TAG}"
+            FRONTEND_IMAGE="${IMAGE_PREFIX}/frontend:${IMAGE_TAG}"
+
+            gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+            gcloud config set project "${GCP_PROJECT_ID}"
+
+            gcloud run deploy "${BACKEND_SERVICE}" \
+              --image "${BACKEND_IMAGE}" \
+              --region "${GCP_REGION}" \
+              --platform managed \
+              --allow-unauthenticated
+
+            gcloud run deploy "${FRONTEND_SERVICE}" \
+              --image "${FRONTEND_IMAGE}" \
+              --region "${GCP_REGION}" \
+              --platform managed \
+              --allow-unauthenticated \
+              --update-secrets "AUTH0_DOMAIN=chessapp-auth0-domain:latest,AUTH0_CLIENT_ID=chessapp-auth0-client-id:latest,AUTH0_CLIENT_SECRET=chessapp-auth0-client-secret:latest,AUTH0_SECRET=chessapp-auth0-secret:latest,AUTH0_AUDIENCE=chessapp-auth0-audience:latest" \
+              --set-env-vars "NODE_ENV=production,BACKEND_URL=${BACKEND_BASE_URL},NEXT_PUBLIC_BACKEND_URL=${BACKEND_BASE_URL},APP_BASE_URL=${FRONTEND_BASE_URL:-https://pending.example.com}"
+
+            RESOLVED_FRONTEND_URL="${FRONTEND_BASE_URL:-$(gcloud run services describe "${FRONTEND_SERVICE}" --region "${GCP_REGION}" --format='value(status.url)')}"
+
+            gcloud run services update "${FRONTEND_SERVICE}" \
+              --region "${GCP_REGION}" \
+              --update-env-vars "APP_BASE_URL=${RESOLVED_FRONTEND_URL},BACKEND_URL=${BACKEND_BASE_URL},NEXT_PUBLIC_BACKEND_URL=${BACKEND_BASE_URL}"
+
+            gcloud run services update "${BACKEND_SERVICE}" \
+              --region "${GCP_REGION}" \
+              --update-env-vars "CORS_ALLOWED_ORIGINS=${RESOLVED_FRONTEND_URL}"
+
+            echo "Frontend URL: ${RESOLVED_FRONTEND_URL}"
+            echo "Backend URL: ${BACKEND_BASE_URL}"
+          '''
+        }
       }
     }
   }
