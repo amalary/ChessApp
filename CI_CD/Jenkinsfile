@@ -9,12 +9,12 @@ pipeline {
     string(name: 'FRONTEND_SERVICE', defaultValue: 'chessapp-frontend', description: 'Existing or desired Cloud Run frontend service name.')
     string(name: 'BACKEND_BASE_URL', defaultValue: 'https://chess-backend-580461236477.us-central1.run.app', description: 'Public backend URL used by the frontend and CORS.')
     string(name: 'FRONTEND_BASE_URL', defaultValue: '', description: 'Optional public frontend URL. Leave blank to use the generated Cloud Run URL.')
-    string(name: 'GCP_SERVICE_ACCOUNT_KEY', defaultValue: 'gcp-service-account-key', description: 'Jenkins file credential ID for a Google service account key.')
     booleanParam(name: 'DEPLOY_TO_CLOUD_RUN', defaultValue: true, description: 'Deploy backend and frontend after pushing images.')
   }
 
   environment {
     DOCKERHUB = credentials('dockerhub-credentials')
+    GCP_SERVICE_ACCOUNT_KEY_CREDENTIAL_ID = 'gcp-service-account-key'
   }
 
   stages {
@@ -39,9 +39,6 @@ pipeline {
         script {
           if (!params.GCP_PROJECT_ID?.trim()) {
             error('Set the GCP_PROJECT_ID Jenkins parameter before deploying to Cloud Run.')
-          }
-          if (!params.GCP_SERVICE_ACCOUNT_KEY?.trim()) {
-            error('Set the GCP_SERVICE_ACCOUNT_KEY Jenkins parameter before deploying to Cloud Run.')
           }
           if (!params.BACKEND_BASE_URL?.trim()) {
             error('Set BACKEND_BASE_URL to the public backend Cloud Run URL.')
@@ -115,13 +112,13 @@ stage('Lint: Frontend') {
         expression { return params.DEPLOY_TO_CLOUD_RUN }
       }
       steps {
-        withCredentials([file(credentialsId: "${params.GCP_SERVICE_ACCOUNT_KEY}", variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+        withCredentials([file(credentialsId: "${env.GCP_SERVICE_ACCOUNT_KEY_CREDENTIAL_ID}", variable: 'GCP_SERVICE_ACCOUNT_KEY_FILE')]) {
           sh '''
             set -eu
             REGISTRY="${GCP_REGION}-docker.pkg.dev"
             IMAGE_PREFIX="${REGISTRY}/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}"
 
-            gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+            gcloud auth activate-service-account --key-file="${GCP_SERVICE_ACCOUNT_KEY_FILE}"
             gcloud config set project "${GCP_PROJECT_ID}"
             gcloud artifacts repositories describe "${ARTIFACT_REPOSITORY}" \
               --location "${GCP_REGION}" >/dev/null 2>&1 || \
@@ -145,7 +142,7 @@ stage('Lint: Frontend') {
         expression { return params.DEPLOY_TO_CLOUD_RUN }
       }
       steps {
-        withCredentials([file(credentialsId: "${params.GCP_SERVICE_ACCOUNT_KEY}", variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+        withCredentials([file(credentialsId: "${env.GCP_SERVICE_ACCOUNT_KEY_CREDENTIAL_ID}", variable: 'GCP_SERVICE_ACCOUNT_KEY_FILE')]) {
           sh '''
             set -eu
             REGISTRY="${GCP_REGION}-docker.pkg.dev"
@@ -153,7 +150,7 @@ stage('Lint: Frontend') {
             BACKEND_IMAGE="${IMAGE_PREFIX}/backend:${IMAGE_TAG}"
             FRONTEND_IMAGE="${IMAGE_PREFIX}/frontend:${IMAGE_TAG}"
 
-            gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+            gcloud auth activate-service-account --key-file="${GCP_SERVICE_ACCOUNT_KEY_FILE}"
             gcloud config set project "${GCP_PROJECT_ID}"
 
             gcloud run deploy "${BACKEND_SERVICE}" \
