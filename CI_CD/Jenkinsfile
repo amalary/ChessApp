@@ -105,14 +105,26 @@ stage('Lint: Frontend') {
             -p 18080:8080 \
             "${DOCKERHUB_USR}/puzzle-backend:latest"
 
+          docker port "${CONTAINER_NAME}"
+
+          smoke_curl() {
+            curl -fsS http://127.0.0.1:18080/ && return 0
+
+            # Containerized Jenkins may not share localhost with the Docker daemon.
+            # Keep the same smoke-test URL, but issue it from Docker's host network.
+            docker run --rm --network host curlimages/curl:8.10.1 \
+              -fsS http://127.0.0.1:18080/
+          }
+
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:18080/; then
+            if smoke_curl; then
               exit 0
             fi
             sleep 1
           done
 
           echo "Backend container failed local / smoke test."
+          docker ps --filter "name=${CONTAINER_NAME}"
           exit 1
         '''
         sh '''
