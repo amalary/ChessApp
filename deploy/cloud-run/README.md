@@ -17,6 +17,14 @@ gcloud run services replace deploy/cloud-run/backend.yaml --region REGION
 gcloud run services replace deploy/cloud-run/frontend.yaml --region REGION
 ```
 
+Validate the backend image locally before deploying:
+
+```sh
+docker build -t chessapp-backend-local ./backend
+docker run --rm -e PORT=8080 -e REDIS_URL=redis://host.docker.internal:6379/0 -p 8080:8080 chessapp-backend-local
+curl http://localhost:8080/
+```
+
 If local-auth login returns `Database unavailable for login`, verify the deployed
 backend configuration rather than the template file:
 
