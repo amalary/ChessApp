@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
