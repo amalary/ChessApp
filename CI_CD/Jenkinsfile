@@ -87,7 +87,7 @@ stage('Lint: Frontend') {
           set -eu
           CONTAINER_NAME="puzzle-backend-smoke-${BUILD_NUMBER}"
           REDIS_NAME="${CONTAINER_NAME}-redis"
-          NETWORK_NAME="${CONTAINER_NAME}-net"
+          NETWORK_NAME="chess-smoke-net"
           docker rm -f "${CONTAINER_NAME}" "${REDIS_NAME}" >/dev/null 2>&1 || true
           docker network rm "${NETWORK_NAME}" >/dev/null 2>&1 || true
 
@@ -125,7 +125,10 @@ stage('Lint: Frontend') {
           done
 
           echo "Backend container failed local / smoke test."
+          echo "Backend logs:"
           docker logs "${CONTAINER_NAME}" || true
+          echo "Redis logs:"
+          docker logs "${REDIS_NAME}" || true
           docker ps
           exit 1
         '''
