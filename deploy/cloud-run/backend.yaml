@@ -61,6 +61,8 @@ spec:
               value: "1400"
             - name: GEMINI_IMAGE_MAX_DIMENSION
               value: "2200"
+            - name: AGENT_FAIL_OPEN_ON_RETRIEVAL_ERRORS
+              value: "true"
             - name: AUTH0_DOMAIN
               valueFrom:
                 secretKeyRef:

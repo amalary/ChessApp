@@ -324,6 +324,10 @@ def _allow_graceful_gemini_fallback() -> bool:
     return _env_bool("AGENT_FAIL_OPEN_ON_GEMINI_ERRORS", default=False)
 
 
+def _allow_graceful_retrieval_fallback() -> bool:
+    return _env_bool("AGENT_FAIL_OPEN_ON_RETRIEVAL_ERRORS", default=True)
+
+
 def _get_max_distance_threshold() -> float:
     # Similarity guardrail: higher distance means weaker semantic match in pgvector.
     threshold = _env_float("AGENT_RETRIEVAL_MAX_DISTANCE", DEFAULT_MAX_DISTANCE)
@@ -953,15 +957,18 @@ def generate_rag_answer(
     try:
         raw_chunks = retrieve_chunks(clean_query, limit)
     except RetrievalDatabaseError as exc:
+        logger.warning("agent_chat retrieval database unavailable: %s", exc)
+        if _allow_graceful_retrieval_fallback():
+            return {"answer": EMBEDDING_UNAVAILABLE_ANSWER}
         raise AgentDatabaseError("Failed to retrieve documentation chunks.") from exc
     except EmbeddingServiceError as exc:
         logger.warning("agent_chat embedding unavailable: %s", exc)
-        if _allow_graceful_gemini_fallback():
+        if _allow_graceful_retrieval_fallback():
             return {"answer": EMBEDDING_UNAVAILABLE_ANSWER}
         raise GeminiServiceError("Failed to embed query for retrieval.") from exc
     except Exception as exc:
         logger.warning("agent_chat retrieval unavailable (unexpected): %s", exc)
-        if _allow_graceful_gemini_fallback():
+        if _allow_graceful_retrieval_fallback():
             return {"answer": EMBEDDING_UNAVAILABLE_ANSWER}
         raise GeminiServiceError(
             "Retrieval service configuration is unavailable. Check DATABASE_URL and GEMINI_API_KEY/GOOGLE_API_KEY."
