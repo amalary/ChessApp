@@ -22,6 +22,8 @@ FILES = "abcdefgh"
 RANKS = "87654321"
 SQUARES = [f"{file}{rank}" for rank in RANKS for file in FILES]
 PIECES = {"K", "Q", "R", "B", "N", "P", "k", "q", "r", "b", "n", "p", "."}
+DEFAULT_MIN_TRANSCRIPTION_IMAGE_DIMENSION = 1400
+DEFAULT_MAX_TRANSCRIPTION_IMAGE_DIMENSION = 2200
 
 SYSTEM_PROMPT = """
 You are a chessboard transcriber. You do NOT solve chess.
@@ -67,12 +69,45 @@ def _preprocess_image_variants(
     variants: list[tuple[bytes, str]] = [(image_bytes, _guess_mime(filename))]
     try:
         img = Image.open(BytesIO(image_bytes)).convert("RGB")
-        normalized = ImageOps.autocontrast(img, cutoff=1)
-        normalized = ImageEnhance.Sharpness(normalized).enhance(1.25)
-        normalized = ImageEnhance.Contrast(normalized).enhance(1.15)
+        min_dimension = max(
+            512,
+            _env_int(
+                "GEMINI_IMAGE_MIN_DIMENSION",
+                DEFAULT_MIN_TRANSCRIPTION_IMAGE_DIMENSION,
+            ),
+        )
+        max_dimension = max(
+            min_dimension,
+            _env_int(
+                "GEMINI_IMAGE_MAX_DIMENSION",
+                DEFAULT_MAX_TRANSCRIPTION_IMAGE_DIMENSION,
+            ),
+        )
+        largest_dimension = max(img.size)
+        scale = 1.0
+        if largest_dimension < min_dimension:
+            scale = min_dimension / float(largest_dimension)
+        elif largest_dimension > max_dimension:
+            scale = max_dimension / float(largest_dimension)
+
+        preserved = img
+        if scale != 1.0:
+            target_size = (
+                max(1, int(round(img.width * scale))),
+                max(1, int(round(img.height * scale))),
+            )
+            preserved = img.resize(target_size, Image.Resampling.LANCZOS)
 
         out = BytesIO()
-        normalized.save(out, format="PNG")
+        preserved.save(out, format="PNG", optimize=True)
+        variants.append((out.getvalue(), "image/png"))
+
+        normalized = ImageOps.autocontrast(preserved, cutoff=0.5)
+        normalized = ImageEnhance.Sharpness(normalized).enhance(1.15)
+        normalized = ImageEnhance.Contrast(normalized).enhance(1.08)
+
+        out = BytesIO()
+        normalized.save(out, format="PNG", optimize=True)
         variants.append((out.getvalue(), "image/png"))
     except Exception:
         pass

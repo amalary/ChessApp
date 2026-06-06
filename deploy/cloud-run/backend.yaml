@@ -57,6 +57,10 @@ spec:
               value: "2"
             - name: GEMINI_CONSENSUS_EXIT_VOTES
               value: "3"
+            - name: GEMINI_IMAGE_MIN_DIMENSION
+              value: "1400"
+            - name: GEMINI_IMAGE_MAX_DIMENSION
+              value: "2200"
             - name: AUTH0_DOMAIN
               valueFrom:
                 secretKeyRef:

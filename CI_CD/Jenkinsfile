@@ -187,7 +187,7 @@ stage('Lint: Frontend') {
               --allow-unauthenticated \
               --add-cloudsql-instances "${CLOUD_SQL_INSTANCE}" \
               --update-secrets "DB_PASSWORD=chess-db-pass:latest,GOOGLE_API_KEY=gemini-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,AUTH0_CLIENT_ID=chessapp-auth0-client-id:latest,AUTH0_CLIENT_SECRET=chessapp-auth0-client-secret:latest,AUTH0_SECRET=chessapp-auth0-secret:latest,LOCAL_AUTH_SESSION_SECRET=chessapp-auth0-secret:latest" \
-              --set-env-vars "APP_ENV=production,DB_NAME=chessapp,DB_USER=app_user,CLOUD_SQL_CONNECTION_NAME=${CLOUD_SQL_INSTANCE},STOCKFISH_PATH=/usr/games/stockfish,AUTH0_DOMAIN=dev-67f56xwhohhonhmt.us.auth0.com,AUTH0_AUDIENCE=https://chessapp-backend,ALLOW_LOCAL_AUTH_FALLBACK=true,SYNC_LOCAL_AUTH_WITH_AUTH0=false,GEMINI_MODEL=gemini-2.5-flash,GEMINI_TRANSCRIBE_ATTEMPTS=7,GEMINI_MAX_ATTEMPTS_HARD_CAP=7,GEMINI_MIN_CONSENSUS_VOTES=2,GEMINI_CONSENSUS_EXIT_VOTES=3"
+              --set-env-vars "APP_ENV=production,DB_NAME=chessapp,DB_USER=app_user,CLOUD_SQL_CONNECTION_NAME=${CLOUD_SQL_INSTANCE},STOCKFISH_PATH=/usr/games/stockfish,AUTH0_DOMAIN=dev-67f56xwhohhonhmt.us.auth0.com,AUTH0_AUDIENCE=https://chessapp-backend,ALLOW_LOCAL_AUTH_FALLBACK=true,SYNC_LOCAL_AUTH_WITH_AUTH0=false,GEMINI_MODEL=gemini-2.5-flash,GEMINI_TRANSCRIBE_ATTEMPTS=7,GEMINI_MAX_ATTEMPTS_HARD_CAP=7,GEMINI_MIN_CONSENSUS_VOTES=2,GEMINI_CONSENSUS_EXIT_VOTES=3,GEMINI_IMAGE_MIN_DIMENSION=1400,GEMINI_IMAGE_MAX_DIMENSION=2200"
 
             gcloud run deploy "${FRONTEND_SERVICE}" \
               --image "${FRONTEND_IMAGE}" \

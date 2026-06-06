@@ -336,6 +336,46 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
 
 
 class GeminiHardeningTests(unittest.TestCase):
+    def test_preprocess_variants_preserve_original_and_upscale_small_crop(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_IMAGE_MIN_DIMENSION": "1400",
+                "GEMINI_IMAGE_MAX_DIMENSION": "2200",
+            },
+            clear=False,
+        ):
+            original = _png_bytes(width=320, height=240)
+            variants = gemini_fen._preprocess_image_variants(original, "board.png")
+
+        self.assertGreaterEqual(len(variants), 3)
+        self.assertEqual(variants[0], (original, "image/png"))
+
+        from PIL import Image
+
+        preserved = Image.open(BytesIO(variants[1][0]))
+        self.assertEqual(max(preserved.size), 1400)
+
+    def test_preprocess_variants_bound_large_images_without_jpeg_loss(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_IMAGE_MIN_DIMENSION": "1400",
+                "GEMINI_IMAGE_MAX_DIMENSION": "1600",
+            },
+            clear=False,
+        ):
+            variants = gemini_fen._preprocess_image_variants(
+                _png_bytes(width=3000, height=2200),
+                "board.png",
+            )
+
+        from PIL import Image
+
+        preserved = Image.open(BytesIO(variants[1][0]))
+        self.assertEqual(max(preserved.size), 1600)
+        self.assertEqual(variants[1][1], "image/png")
+
     def test_attempt_hard_cap_limits_total_attempts(self) -> None:
         call_count = 0
 
