@@ -99,41 +99,6 @@ stage('Lint: Frontend') {
       }
     }
 
-    stage('Smoke: Backend FastAPI') {
-      steps {
-        sh '''
-          set -eu
-
-          cleanup() {
-            docker logs puzzle-backend-smoke >/dev/null 2>&1 && docker logs puzzle-backend-smoke || true
-            docker rm -f puzzle-backend-smoke puzzle-redis >/dev/null 2>&1 || true
-            docker network rm chess-smoke-net >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-
-          docker rm -f puzzle-backend-smoke puzzle-redis >/dev/null 2>&1 || true
-          docker network rm chess-smoke-net >/dev/null 2>&1 || true
-          docker network create chess-smoke-net
-
-          docker run -d \
-            --name puzzle-redis \
-            --network chess-smoke-net \
-            redis:7-alpine
-
-          docker run -d \
-            --name puzzle-backend-smoke \
-            --network chess-smoke-net \
-            -e PORT=8080 \
-            -e REDIS_URL=redis://puzzle-redis:6379/0 \
-            ${DOCKERHUB_USR}/puzzle-backend:latest
-
-          sleep 5
-          docker run --rm --network chess-smoke-net --entrypoint curl curlimages/curl:latest \
-            -fsS http://puzzle-backend-smoke:8080/
-        '''
-      }
-    }
-
     stage('Push Images') {
       steps {
         sh 'echo ${DOCKERHUB_PSW} | docker login -u ${DOCKERHUB_USR} --password-stdin'
@@ -217,6 +182,15 @@ stage('Lint: Frontend') {
             echo "Backend URL: ${BACKEND_BASE_URL}"
           '''
         }
+      }
+    }
+
+    stage('Smoke: Deployed Backend') {
+      when {
+        expression { return params.DEPLOY_TO_CLOUD_RUN }
+      }
+      steps {
+        sh 'curl -fsS https://chess-backend-580461236477.us-central1.run.app/'
       }
     }
   }
