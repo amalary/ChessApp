@@ -278,6 +278,77 @@ def _validate_fen_or_raise(fen: str) -> chess.Board:
     return board
 
 
+def _candidate_fens_from_gemini_result(gemini_result: dict) -> list[dict]:
+    selected_fen = gemini_result.get("fen")
+    selected_confidence = gemini_result.get("confidence")
+    selected_side = gemini_result.get("side_to_move")
+    candidates = gemini_result.get("candidates")
+
+    rows: list[dict] = []
+    if isinstance(candidates, list):
+        rows.extend(row for row in candidates if isinstance(row, dict))
+
+    if isinstance(selected_fen, str) and selected_fen.strip():
+        rows.insert(
+            0,
+            {
+                "fen": selected_fen,
+                "confidence": (
+                    selected_confidence
+                    if isinstance(selected_confidence, (int, float))
+                    else 0.0
+                ),
+                "side_to_move": selected_side,
+                "is_valid": True,
+            },
+        )
+
+    unique_rows: list[dict] = []
+    seen: set[str] = set()
+    for row in rows:
+        fen = row.get("fen")
+        if not isinstance(fen, str) or not fen.strip() or fen in seen:
+            continue
+        seen.add(fen)
+        unique_rows.append(row)
+    return unique_rows
+
+
+def _find_engine_verified_mate_candidate(
+    *,
+    gemini_result: dict,
+    stockfish_path: str,
+) -> tuple[dict, object] | None:
+    best: tuple[dict, object, int, float] | None = None
+    for row in _candidate_fens_from_gemini_result(gemini_result):
+        fen = row.get("fen")
+        if not isinstance(fen, str):
+            continue
+        try:
+            _validate_fen_or_raise(fen)
+            result = find_mate_in_1_to_3(
+                fen=fen,
+                stockfish_path=stockfish_path,
+                think_time_s=2.0,
+                max_mate=3,
+            )
+        except Exception:
+            continue
+        if result is None:
+            continue
+        confidence = row.get("confidence")
+        confidence_score = (
+            float(confidence) if isinstance(confidence, (int, float)) else 0.0
+        )
+        score = (3 - int(result.mate_in), confidence_score)
+        if best is None or score > (best[2], best[3]):
+            best = (row, result, score[0], score[1])
+
+    if best is None:
+        return None
+    return best[0], best[1]
+
+
 def _resolve_stockfish_path_or_raise() -> str:
     bundled_stockfish_path = (
         Path(__file__).resolve().parents[2]
@@ -512,6 +583,7 @@ async def solve(
             upload.filename,
             expected_side_to_move=expected_side_to_move,
             attempts=max(1, _env_int("GEMINI_TRANSCRIBE_ATTEMPTS", 5)),
+            include_candidates=True,
         )
         gemini_raw_output = gemini_result.get("raw_output")
         fen = gemini_result["fen"]
@@ -525,13 +597,29 @@ async def solve(
         # 3) Run Stockfish
         stockfish_path = _resolve_stockfish_path_or_raise()
 
-        result = find_mate_in_1_to_3(
-            fen=fen,
+        verified_mate = _find_engine_verified_mate_candidate(
+            gemini_result=gemini_result,
             stockfish_path=stockfish_path,
-            think_time_s=2.0,
-            max_mate=3,
         )
-        mate_found = result is not None
+        if verified_mate is not None:
+            verified_row, result = verified_mate
+            fen = verified_row["fen"]
+            parsed_fen = fen
+            confidence = verified_row.get("confidence", confidence)
+            gemini_result["fen"] = fen
+            gemini_result["confidence"] = confidence
+            gemini_result["side_to_move"] = (
+                "white" if chess.Board(fen).turn else "black"
+            )
+            mate_found = True
+        else:
+            result = find_mate_in_1_to_3(
+                fen=fen,
+                stockfish_path=stockfish_path,
+                think_time_s=2.0,
+                max_mate=3,
+            )
+            mate_found = result is not None
         if result is None:
             result = find_best_engine_line(
                 fen=fen,

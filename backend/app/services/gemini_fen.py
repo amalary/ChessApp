@@ -282,6 +282,7 @@ def _pick_consensus_fen(
     expected_side: str | None = None,
     attempts_used: int | None = None,
     include_raw_output: bool = False,
+    include_candidates: bool = False,
 ) -> dict[str, Any]:
     rows = list(candidates)
     if not rows:
@@ -322,7 +323,32 @@ def _pick_consensus_fen(
     }
     if include_raw_output:
         result["raw_output"] = selected_raw_output
+    if include_candidates:
+        result["candidates"] = _public_candidates(rows)
     return result
+
+
+def _public_candidates(candidates: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in candidates:
+        fen = item.get("fen")
+        if not isinstance(fen, str) or not fen.strip() or fen in seen:
+            continue
+        seen.add(fen)
+        confidence = item.get("confidence")
+        rows.append(
+            {
+                "fen": fen,
+                "confidence": (
+                    confidence if isinstance(confidence, (int, float)) else 0.0
+                ),
+                "side_to_move": "white" if item.get("side") == "w" else "black",
+                "is_valid": bool(item.get("is_valid")),
+                "side_matches_expected": bool(item.get("side_matches_expected")),
+            }
+        )
+    return rows
 
 
 def fen_from_image_bytes(
@@ -331,6 +357,7 @@ def fen_from_image_bytes(
     expected_side_to_move: str | None = None,
     attempts: int = 3,
     include_raw_output: bool = False,
+    include_candidates: bool = False,
 ) -> Dict[str, Any]:
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -427,6 +454,8 @@ def fen_from_image_bytes(
                 }
                 if include_raw_output:
                     result["raw_output"] = raw_output
+                if include_candidates:
+                    result["candidates"] = _public_candidates(valid_candidates)
                 return result
             correction_message = (
                 "Double-check every occupied square and ensure board_map is exact."
@@ -448,10 +477,12 @@ def fen_from_image_bytes(
             expected_side=expected,
             attempts_used=max_attempts,
             include_raw_output=include_raw_output,
+            include_candidates=include_candidates,
         )
     return _pick_consensus_fen(
         all_candidates if all_candidates else valid_candidates,
         expected_side=expected,
         attempts_used=max_attempts,
         include_raw_output=include_raw_output,
+        include_candidates=include_candidates,
     )

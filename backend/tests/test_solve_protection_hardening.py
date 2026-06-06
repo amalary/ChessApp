@@ -253,6 +253,77 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["moves_san"], ["e4", "e5"])
         self.assertEqual(response["moves_uci"], ["e2e4", "e7e5"])
 
+    async def test_solve_prefers_engine_verified_mate_candidate(self) -> None:
+        from app import main
+
+        req = _request(path="/solve")
+        upload = protection_service.ValidatedSolveUpload(
+            data=_png_bytes(),
+            filename="board.png",
+            content_type="image/png",
+        )
+        consensus_fen = "6k1/5ppp/8/8/8/8/5PPP/6KQ b - - 0 1"
+        mate_fen = "6k1/5ppp/8/8/8/8/5PPP/6KQ w - - 0 1"
+        mate_line = SimpleNamespace(
+            mate_in=1,
+            moves_san=["Qh8#"],
+            moves_uci=["h1h8"],
+        )
+
+        def _mate_for_candidate(*, fen: str, **_kwargs):
+            return mate_line if fen == mate_fen else None
+
+        with patch(
+            "app.main.fen_from_image_bytes",
+            return_value={
+                "fen": consensus_fen,
+                "confidence": 0.98,
+                "side_to_move": "black",
+                "attempts_used": 5,
+                "raw_output": "{}",
+                "candidates": [
+                    {
+                        "fen": consensus_fen,
+                        "confidence": 0.98,
+                        "side_to_move": "black",
+                        "is_valid": True,
+                    },
+                    {
+                        "fen": mate_fen,
+                        "confidence": 0.91,
+                        "side_to_move": "white",
+                        "is_valid": True,
+                    },
+                ],
+            },
+        ), patch(
+            "app.main._resolve_stockfish_path_or_raise", return_value="stockfish"
+        ), patch(
+            "app.main.find_mate_in_1_to_3",
+            side_effect=_mate_for_candidate,
+        ), patch(
+            "app.main.find_best_engine_line",
+            return_value=None,
+        ), patch(
+            "app.main.get_optional_local_auth_user_from_current_user",
+            return_value=None,
+        ), patch(
+            "app.main.clear_failed_solve_attempts",
+            new_callable=AsyncMock,
+        ):
+            response = await main.solve(
+                request=req,
+                current_user={"sub": "auth0|user"},
+                upload=upload,
+                _engine_guard=None,
+                db=SimpleNamespace(),
+            )
+
+        self.assertEqual(response["fen"], mate_fen)
+        self.assertTrue(response["mate_found"])
+        self.assertEqual(response["mate_in"], 1)
+        self.assertEqual(response["moves_san"], ["Qh8#"])
+
 
 class GeminiHardeningTests(unittest.TestCase):
     def test_attempt_hard_cap_limits_total_attempts(self) -> None:
@@ -350,6 +421,44 @@ class GeminiHardeningTests(unittest.TestCase):
 
         self.assertEqual(result["fen"], "6k1/8/8/8/8/8/8/6KQ w - - 0 1")
         self.assertEqual(result["side_to_move"], "white")
+
+    def test_include_candidates_returns_unique_valid_candidates(self) -> None:
+        board_map = {square: "." for square in gemini_fen.SQUARES}
+        board_map.update({"g8": "k", "g1": "K", "h1": "Q"})
+
+        with patch.dict(
+            os.environ,
+            {
+                "GOOGLE_API_KEY": "test-key",
+                "GEMINI_TRANSCRIBE_ATTEMPTS": "1",
+                "GEMINI_MAX_ATTEMPTS_HARD_CAP": "1",
+            },
+            clear=False,
+        ):
+            with patch("app.services.gemini_fen.genai.Client", return_value=object()):
+                with patch(
+                    "app.services.gemini_fen._preprocess_image_variants",
+                    return_value=[(b"x", "image/png")],
+                ):
+                    with patch(
+                        "app.services.gemini_fen._call_gemini_structured",
+                        return_value={
+                            "side_to_move": "white",
+                            "confidence": 0.9,
+                            "board_map": board_map,
+                            "_raw_output": "{}",
+                        },
+                    ):
+                        result = gemini_fen.fen_from_image_bytes(
+                            b"dummy",
+                            filename="board.png",
+                            expected_side_to_move="white",
+                            attempts=1,
+                            include_candidates=True,
+                        )
+
+        self.assertEqual(len(result["candidates"]), 1)
+        self.assertEqual(result["candidates"][0]["fen"], result["fen"])
 
 
 if __name__ == "__main__":
