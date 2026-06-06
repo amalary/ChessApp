@@ -198,6 +198,8 @@ stage('Lint: Frontend') {
               --set-env-vars "NODE_ENV=production,BACKEND_URL=${BACKEND_BASE_URL},NEXT_PUBLIC_BACKEND_URL=${BACKEND_BASE_URL},APP_BASE_URL=${FRONTEND_BASE_URL:-https://pending.example.com}"
 
             RESOLVED_FRONTEND_URL="${FRONTEND_BASE_URL:-$(gcloud run services describe "${FRONTEND_SERVICE}" --region "${GCP_REGION}" --format='value(status.url)')}"
+            PROJECT_NUMBER="$(gcloud projects describe "${GCP_PROJECT_ID}" --format='value(projectNumber)')"
+            CANONICAL_FRONTEND_URL="https://${FRONTEND_SERVICE}-${PROJECT_NUMBER}.${GCP_REGION}.run.app"
 
             gcloud run services update "${FRONTEND_SERVICE}" \
               --region "${GCP_REGION}" \
@@ -205,9 +207,10 @@ stage('Lint: Frontend') {
 
             gcloud run services update "${BACKEND_SERVICE}" \
               --region "${GCP_REGION}" \
-              --update-env-vars "CORS_ALLOWED_ORIGINS=${RESOLVED_FRONTEND_URL}"
+              --update-env-vars "^|^CORS_ALLOWED_ORIGINS=${RESOLVED_FRONTEND_URL},${CANONICAL_FRONTEND_URL}"
 
             echo "Frontend URL: ${RESOLVED_FRONTEND_URL}"
+            echo "Frontend canonical URL: ${CANONICAL_FRONTEND_URL}"
             echo "Backend URL: ${BACKEND_BASE_URL}"
           '''
         }
