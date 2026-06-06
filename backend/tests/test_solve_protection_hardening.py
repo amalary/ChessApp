@@ -201,6 +201,8 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["moves_san"], ["Qh4#"])
         self.assertEqual(response["moves_uci"], ["d8h4"])
         self.assertTrue(response["mate_found"])
+        self.assertEqual(response["solver_confidence"], 0.7562)
+        self.assertEqual(response["solver_confidence_label"], "medium")
 
     async def test_solve_returns_best_engine_line_when_no_short_mate(self) -> None:
         from app import main
@@ -252,6 +254,8 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(response["mate_in"])
         self.assertEqual(response["moves_san"], ["e4", "e5"])
         self.assertEqual(response["moves_uci"], ["e2e4", "e7e5"])
+        self.assertEqual(response["solver_confidence"], 0.7087)
+        self.assertEqual(response["solver_confidence_label"], "low")
 
     async def test_solve_rejects_unstable_mate_candidate(self) -> None:
         from app import main

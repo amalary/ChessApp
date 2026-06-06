@@ -4762,7 +4762,7 @@ function DashboardPageContent() {
                               </span>
                             </p>
                             <p>
-                              <span className="text-slate-400">Vision confidence:</span>{' '}
+                              <span className="text-slate-400">Solver confidence:</span>{' '}
                               <span className="font-medium text-slate-700">
                                 {formatConfidence(submission.positionCheck.confidence)}
                               </span>
@@ -5448,7 +5448,7 @@ function DashboardPageContent() {
                                 </span>
                               </p>
                               <p>
-                                <span className="text-slate-400">Vision confidence:</span>{' '}
+                                <span className="text-slate-400">Solver confidence:</span>{' '}
                                 <span className="font-medium text-slate-700">
                                   {formatConfidence(submission.positionCheck.confidence)}
                                 </span>

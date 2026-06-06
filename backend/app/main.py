@@ -326,14 +326,16 @@ def _matching_candidate_for_fen(gemini_result: dict, fen: str) -> dict | None:
 
     selected_fen = gemini_result.get("fen")
     if selected_fen == fen:
-        return {
+        row = {
             "fen": selected_fen,
             "confidence": gemini_result.get("confidence"),
             "side_to_move": gemini_result.get("side_to_move"),
             "is_valid": True,
             "vote_count": gemini_result.get("consensus_votes"),
-            "side_matches_expected": gemini_result.get("side_matches_expected"),
         }
+        if "side_matches_expected" in gemini_result:
+            row["side_matches_expected"] = gemini_result.get("side_matches_expected")
+        return row
     return None
 
 
@@ -345,6 +347,77 @@ def _as_positive_int(value: object, default: int = 0) -> int:
     except (TypeError, ValueError):
         return default
     return max(0, parsed)
+
+
+def _solver_confidence_label(confidence: float) -> str:
+    if confidence >= 0.9:
+        return "high"
+    if confidence >= 0.75:
+        return "medium"
+    return "low"
+
+
+def _build_solver_confidence(
+    *,
+    gemini_result: dict,
+    vision_confidence: float,
+    mate_found: bool,
+    result: object | None,
+) -> float:
+    candidates = gemini_result.get("candidates")
+    attempts_used = _as_positive_int(gemini_result.get("attempts_used"), 1)
+    selected_row = _matching_candidate_for_fen(
+        gemini_result, str(gemini_result.get("fen", ""))
+    )
+    consensus_votes = _as_positive_int(
+        gemini_result.get("consensus_votes"),
+        _as_positive_int(
+            selected_row.get("vote_count") if isinstance(selected_row, dict) else None,
+            1,
+        ),
+    )
+    if consensus_votes == 0:
+        consensus_votes = 1
+    unique_fen_count = _as_positive_int(gemini_result.get("unique_fen_count"), 1)
+    if isinstance(candidates, list) and candidates:
+        unique_fen_count = max(
+            unique_fen_count,
+            len(
+                {
+                    row.get("fen")
+                    for row in candidates
+                    if isinstance(row, dict) and isinstance(row.get("fen"), str)
+                }
+            ),
+        )
+
+    required_attempts_for_full_consensus = max(
+        3, _env_int("GEMINI_MIN_CONSENSUS_VOTES", 2)
+    )
+    attempt_coverage = min(1.0, attempts_used / required_attempts_for_full_consensus)
+    consensus_ratio = min(1.0, consensus_votes / max(1, attempts_used))
+    consensus_strength = consensus_ratio * attempt_coverage
+    uniqueness_component = (
+        0.05
+        if unique_fen_count <= 1
+        else max(0.0, 0.05 - (unique_fen_count - 1) * 0.02)
+    )
+    engine_component = 0.15 if mate_found else (0.08 if result is not None else 0.0)
+
+    side_component = 0.03
+    if isinstance(selected_row, dict) and "side_matches_expected" in selected_row:
+        side_component = (
+            0.05 if bool(selected_row.get("side_matches_expected")) else 0.0
+        )
+
+    score = (
+        max(0.0, min(1.0, vision_confidence)) * 0.45
+        + consensus_strength * 0.35
+        + engine_component
+        + uniqueness_component
+        + side_component
+    )
+    return round(max(0.0, min(1.0, score)), 4)
 
 
 def _assert_stable_transcription_or_raise(gemini_result: dict) -> None:
@@ -505,7 +578,11 @@ def _persist_local_auth_submission(
             position_check={
                 "sideToMove": gemini_result.get("side_to_move"),
                 "confidence": confidence,
+                "rawVisionConfidence": gemini_result.get("confidence"),
+                "solverConfidenceLabel": _solver_confidence_label(confidence),
                 "attemptsUsed": gemini_result.get("attempts_used"),
+                "consensusVotes": gemini_result.get("consensus_votes"),
+                "uniqueFenCount": gemini_result.get("unique_fen_count"),
                 "mateFound": mate_found,
                 "mateIn": result.mate_in if mate_found and result else None,
             },
@@ -662,6 +739,13 @@ async def solve(
             )
         stockfish_best_move = _extract_first_uci_move(result)
         stockfish_mate_depth = result.mate_in if mate_found and result else None
+        solver_confidence = _build_solver_confidence(
+            gemini_result=gemini_result,
+            vision_confidence=confidence,
+            mate_found=mate_found,
+            result=result,
+        )
+        solver_confidence_label = _solver_confidence_label(solver_confidence)
         solve_time_ms = max(0, int(round((perf_counter() - started_at) * 1000)))
         gemini_result["side_to_move"] = "white" if chess.Board(fen).turn else "black"
         await clear_failed_solve_attempts(request)
@@ -669,6 +753,8 @@ async def solve(
         final_response = {
             "fen": fen,
             "vision_confidence": confidence,
+            "solver_confidence": solver_confidence,
+            "solver_confidence_label": solver_confidence_label,
             "vision_side_to_move": gemini_result.get("side_to_move"),
             "vision_attempts_used": gemini_result.get("attempts_used"),
             "vision_consensus_votes": gemini_result.get("consensus_votes"),
@@ -692,7 +778,7 @@ async def solve(
                     expected_side_to_move=expected_side_to_move,
                     fen=fen,
                     solve_time_ms=solve_time_ms,
-                    confidence=confidence,
+                    confidence=solver_confidence,
                     gemini_result=gemini_result,
                     result=result,
                     mate_found=mate_found,

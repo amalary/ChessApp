@@ -2137,7 +2137,7 @@ export function PuzzleLabPanel({
                 <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">{analysis.sideToMove ?? 'Unavailable'}</p>
               </article>
               <article className="rounded-xl border border-slate-200/70 dark:border-slate-700/70 bg-white/60 dark:bg-slate-900/35 px-3 py-3">
-                <p className="text-xs uppercase tracking-[0.08em] text-slate-500">Vision confidence</p>
+                <p className="text-xs uppercase tracking-[0.08em] text-slate-500">Solver confidence</p>
                 <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">{formatConfidence(analysis.confidence)}</p>
               </article>
               <article className="rounded-xl border border-slate-200/70 dark:border-slate-700/70 bg-white/60 dark:bg-slate-900/35 px-3 py-3">

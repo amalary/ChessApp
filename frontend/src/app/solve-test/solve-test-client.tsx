@@ -1742,7 +1742,7 @@ export default function SolveTestClient() {
                   )}
                   {visibleMetaCount >= 2 && (
                     <div className="flex items-start justify-between gap-4 chess-stream-item">
-                      <dt className="opacity-70">Vision confidence</dt>
+                      <dt className="opacity-70">Solver confidence</dt>
                       <dd className="font-medium">{formatConfidence(solveMeta.confidence)}</dd>
                     </div>
                   )}

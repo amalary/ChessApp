@@ -22,14 +22,22 @@ describe('solve-test utils', () => {
     const meta = extractSolveMeta({
       vision_side_to_move: 'W',
       vision_confidence: '82',
+      solver_confidence: 0.91,
+      solver_confidence_label: 'high',
       vision_attempts_used: '2',
+      vision_consensus_votes: '2',
+      vision_unique_fen_count: 1,
       mate_found: true,
       mate_in: 3,
     });
     expect(meta).toEqual({
       sideToMove: 'white',
-      confidence: 0.82,
+      confidence: 0.91,
+      rawVisionConfidence: 0.82,
+      confidenceLabel: 'high',
       attemptsUsed: 2,
+      consensusVotes: 2,
+      uniqueFenCount: 1,
       mateFound: true,
       mateIn: 3,
     });
@@ -46,10 +54,22 @@ describe('solve-test utils', () => {
     expect(meta).toEqual({
       sideToMove: null,
       confidence: null,
+      rawVisionConfidence: null,
+      confidenceLabel: null,
       attemptsUsed: null,
+      consensusVotes: null,
+      uniqueFenCount: null,
       mateFound: null,
       mateIn: null,
     });
+  });
+
+  it('falls back to raw vision confidence when solver confidence is absent', () => {
+    const meta = extractSolveMeta({
+      vision_confidence: 0.77,
+    });
+    expect(meta.confidence).toBe(0.77);
+    expect(meta.rawVisionConfidence).toBe(0.77);
   });
 
   it('extracts solution lines with fallback precedence', () => {

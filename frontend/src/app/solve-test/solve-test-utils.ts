@@ -6,8 +6,12 @@ export type SolveResponse = {
   mate_found?: unknown;
   mate_in?: unknown;
   vision_confidence?: unknown;
+  solver_confidence?: unknown;
+  solver_confidence_label?: unknown;
   vision_side_to_move?: unknown;
   vision_attempts_used?: unknown;
+  vision_consensus_votes?: unknown;
+  vision_unique_fen_count?: unknown;
   error?: unknown;
   detail?: unknown;
 };
@@ -15,7 +19,11 @@ export type SolveResponse = {
 export type SolveMeta = {
   sideToMove: 'white' | 'black' | null;
   confidence: number | null;
+  rawVisionConfidence: number | null;
+  confidenceLabel: 'high' | 'medium' | 'low' | null;
   attemptsUsed: number | null;
+  consensusVotes: number | null;
+  uniqueFenCount: number | null;
   mateFound: boolean | null;
   mateIn: number | null;
 };
@@ -178,12 +186,22 @@ function normalizeSide(value: unknown): 'white' | 'black' | null {
   return null;
 }
 
+function normalizeConfidence(value: unknown): number | null {
+  const raw = toFiniteNumber(value);
+  return raw === null ? null : Math.max(0, Math.min(1, raw > 1 ? raw / 100 : raw));
+}
+
+function normalizeConfidenceLabel(value: unknown): 'high' | 'medium' | 'low' | null {
+  const text = toText(value)?.toLowerCase();
+  if (text === 'high' || text === 'medium' || text === 'low') {
+    return text;
+  }
+  return null;
+}
+
 export function extractSolveMeta(data: SolveResponse): SolveMeta {
-  const rawConfidence = toFiniteNumber(data.vision_confidence);
-  const normalizedConfidence =
-    rawConfidence === null
-      ? null
-      : Math.max(0, Math.min(1, rawConfidence > 1 ? rawConfidence / 100 : rawConfidence));
+  const rawVisionConfidence = normalizeConfidence(data.vision_confidence);
+  const solverConfidence = normalizeConfidence(data.solver_confidence);
 
   const rawMateIn = toFiniteNumber(data.mate_in);
   const mateIn =
@@ -192,11 +210,25 @@ export function extractSolveMeta(data: SolveResponse): SolveMeta {
   const rawAttempts = toFiniteNumber(data.vision_attempts_used);
   const attemptsUsed =
     rawAttempts !== null && Number.isInteger(rawAttempts) && rawAttempts >= 1 ? rawAttempts : null;
+  const rawConsensusVotes = toFiniteNumber(data.vision_consensus_votes);
+  const consensusVotes =
+    rawConsensusVotes !== null && Number.isInteger(rawConsensusVotes) && rawConsensusVotes >= 1
+      ? rawConsensusVotes
+      : null;
+  const rawUniqueFenCount = toFiniteNumber(data.vision_unique_fen_count);
+  const uniqueFenCount =
+    rawUniqueFenCount !== null && Number.isInteger(rawUniqueFenCount) && rawUniqueFenCount >= 1
+      ? rawUniqueFenCount
+      : null;
 
   return {
     sideToMove: normalizeSide(data.vision_side_to_move),
-    confidence: normalizedConfidence,
+    confidence: solverConfidence ?? rawVisionConfidence,
+    rawVisionConfidence,
+    confidenceLabel: normalizeConfidenceLabel(data.solver_confidence_label),
     attemptsUsed,
+    consensusVotes,
+    uniqueFenCount,
     mateFound: toBoolean(data.mate_found),
     mateIn,
   };
