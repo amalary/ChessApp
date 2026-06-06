@@ -10,6 +10,8 @@ from google import genai
 from pgvector.psycopg import register_vector
 from psycopg.rows import dict_row
 
+from app.db_auth import build_psycopg_database_url
+
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 ENV_PATH = BACKEND_DIR / ".env"
 load_dotenv(ENV_PATH, override=True)
@@ -32,12 +34,7 @@ def _require_env(name: str) -> str:
 
 @lru_cache(maxsize=1)
 def _get_database_url() -> str:
-    raw_url = _require_env("DATABASE_URL")
-    if raw_url.startswith("postgresql+psycopg://"):
-        return "postgresql://" + raw_url[len("postgresql+psycopg://") :]
-    if raw_url.startswith("postgresql+psycopg2://"):
-        return "postgresql://" + raw_url[len("postgresql+psycopg2://") :]
-    return raw_url
+    return build_psycopg_database_url()
 
 
 @lru_cache(maxsize=1)

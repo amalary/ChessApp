@@ -36,6 +36,15 @@ def _build_database_url() -> str:
     )
 
 
+def build_psycopg_database_url() -> str:
+    database_url = _build_database_url()
+    if database_url.startswith("postgresql+psycopg://"):
+        return "postgresql://" + database_url[len("postgresql+psycopg://") :]
+    if database_url.startswith("postgresql+psycopg2://"):
+        return "postgresql://" + database_url[len("postgresql+psycopg2://") :]
+    return database_url
+
+
 def get_auth_db_config_status() -> dict[str, object]:
     direct_url = os.environ.get("DATABASE_URL")
     db_user = os.environ.get("DB_USER")

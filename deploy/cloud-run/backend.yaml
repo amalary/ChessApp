@@ -1,7 +1,7 @@
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
-  name: chessapp-backend
+  name: chess-backend
   annotations:
     run.googleapis.com/ingress: all
 spec:
@@ -25,28 +25,22 @@ spec:
             - name: CORS_ALLOWED_ORIGINS
               value: https://FRONTEND_DOMAIN
             - name: ALLOW_AUTH_DEBUG_CONFIG
-              value: "true"
+              value: "false"
             - name: DB_USER
-              valueFrom:
-                secretKeyRef:
-                  name: chessapp-db-user
-                  key: latest
+              value: app_user
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: chessapp-db-password
+                  name: chess-db-pass
                   key: latest
             - name: DB_NAME
-              valueFrom:
-                secretKeyRef:
-                  name: chessapp-db-name
-                  key: latest
+              value: chessapp
             - name: CLOUD_SQL_CONNECTION_NAME
               value: PROJECT_ID:REGION:CLOUD_SQL_INSTANCE
             - name: GOOGLE_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: chessapp-google-api-key
+                  name: gemini-api-key
                   key: latest
             - name: AUTH0_DOMAIN
               valueFrom:
@@ -71,10 +65,5 @@ spec:
             - name: LOCAL_AUTH_SESSION_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: chessapp-local-auth-session-secret
-                  key: latest
-            - name: REDIS_URL
-              valueFrom:
-                secretKeyRef:
-                  name: chessapp-redis-url
+                  name: chessapp-auth0-secret
                   key: latest
