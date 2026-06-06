@@ -79,35 +79,6 @@ stage('Lint: Frontend') {
       }
     }
 
-    stage('Smoke: Backend FastAPI') {
-      steps {
-        dir('backend') {
-          sh '''
-            set -eu
-            APP_PID=""
-
-            cleanup() {
-              if [ -n "${APP_PID}" ] && kill -0 "${APP_PID}" >/dev/null 2>&1; then
-                kill "${APP_PID}" >/dev/null 2>&1 || true
-                wait "${APP_PID}" >/dev/null 2>&1 || true
-              fi
-            }
-            trap cleanup EXIT
-
-            python3 -m venv .venv
-            . .venv/bin/activate
-            pip install -r requirements.txt
-
-            PORT=8080 python -m uvicorn app.main:app --host 0.0.0.0 --port 8080 &
-            APP_PID=$!
-
-            sleep 5
-            curl -fsS http://127.0.0.1:8080/
-          '''
-        }
-      }
-    }
-
     stage('Build Docker Images') {
       steps {
         sh 'docker build --build-arg BACKEND_URL="${BACKEND_BASE_URL}" --build-arg NEXT_PUBLIC_BACKEND_URL="${BACKEND_BASE_URL}" -t ${DOCKERHUB_USR}/puzzle-frontend:latest ./frontend'
@@ -124,6 +95,32 @@ stage('Lint: Frontend') {
           docker tag "${DOCKERHUB_USR}/puzzle-frontend:latest" "${IMAGE_PREFIX}/frontend:latest"
           docker tag "${DOCKERHUB_USR}/puzzle-backend:latest" "${IMAGE_PREFIX}/backend:${IMAGE_TAG}"
           docker tag "${DOCKERHUB_USR}/puzzle-backend:latest" "${IMAGE_PREFIX}/backend:latest"
+        '''
+      }
+    }
+
+    stage('Smoke: Backend FastAPI') {
+      steps {
+        sh '''
+          set -eu
+
+          cleanup() {
+            docker logs puzzle-backend-smoke >/dev/null 2>&1 && docker logs puzzle-backend-smoke || true
+            docker rm -f puzzle-backend-smoke >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker rm -f puzzle-backend-smoke >/dev/null 2>&1 || true
+
+          docker run -d \
+            --name puzzle-backend-smoke \
+            --add-host=host.docker.internal:host-gateway \
+            -e PORT=8080 \
+            -p 18080:8080 \
+            ${DOCKERHUB_USR}/puzzle-backend:latest
+
+          sleep 5
+          curl -fsS http://host.docker.internal:18080/
         '''
       }
     }
