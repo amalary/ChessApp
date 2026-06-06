@@ -18,6 +18,12 @@ pipeline {
   }
 
   stages {
+    stage('Jenkinsfile Version') {
+      steps {
+        echo "JENKINSFILE VERSION: smoke-test-disabled-v1"
+      }
+    }
+
     stage('Checkout') {
       steps {
         checkout scm
