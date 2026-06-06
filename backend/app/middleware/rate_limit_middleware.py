@@ -4,7 +4,6 @@ import logging
 
 from fastapi import Request
 
-from app.api.errors import error_response
 from app.services.protection_service import (
     enforce_global_limits,
     populate_request_identity,
@@ -18,15 +17,11 @@ async def rate_limit_middleware(request: Request, call_next):
 
     redis_client = getattr(request.app.state, "redis_client", None)
     if redis_client is None:
-        logger.error(
-            "Redis client missing in rate_limit_middleware endpoint=%s",
+        logger.warning(
+            "Redis client missing; skipping global rate limits endpoint=%s",
             request.url.path,
         )
-        return error_response(
-            status_code=503,
-            code="service_unavailable",
-            message="Service temporarily unavailable.",
-        )
+        return await call_next(request)
 
     limited_response = await enforce_global_limits(
         request=request, redis_client=redis_client

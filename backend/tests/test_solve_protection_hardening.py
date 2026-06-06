@@ -10,16 +10,22 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 from fastapi import UploadFile
 from starlette.requests import Request
+from starlette.responses import JSONResponse
 
+from app.middleware.rate_limit_middleware import rate_limit_middleware
 from app.services import gemini_fen, protection_service
 
 
-def _request(path: str = "/solve", *, remote_ip: str = "127.0.0.1", xff: str | None = None):
+def _request(
+    path: str = "/solve", *, remote_ip: str = "127.0.0.1", xff: str | None = None
+):
     headers: list[tuple[bytes, bytes]] = []
     if xff is not None:
         headers.append((b"x-forwarded-for", xff.encode("utf-8")))
     app = SimpleNamespace(
-        state=SimpleNamespace(redis_client=SimpleNamespace(ttl=AsyncMock(return_value=-2)))
+        state=SimpleNamespace(
+            redis_client=SimpleNamespace(ttl=AsyncMock(return_value=-2))
+        )
     )
     scope = {
         "type": "http",
@@ -46,6 +52,21 @@ def _png_bytes(width: int = 16, height: int = 16) -> bytes:
 
 
 class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rate_limit_middleware_allows_requests_without_redis(self) -> None:
+        req = _request(path="/", remote_ip="127.0.0.1")
+        req.app.state.redis_client = None
+        call_count = 0
+
+        async def _call_next(_request: Request):
+            nonlocal call_count
+            call_count += 1
+            return JSONResponse({"message": "Backend is running"})
+
+        response = await rate_limit_middleware(req, _call_next)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(call_count, 1)
+
     async def test_validate_upload_accepts_real_png_and_sanitizes_name(self) -> None:
         req = _request()
         upload = UploadFile(
@@ -61,8 +82,13 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("\\", result.filename)
         self.assertGreater(len(result.data), 0)
 
-    @patch("app.services.protection_service.record_failed_solve_attempt", new_callable=AsyncMock)
-    async def test_validate_upload_rejects_content_type_mismatch(self, _mock_record_failed: AsyncMock) -> None:
+    @patch(
+        "app.services.protection_service.record_failed_solve_attempt",
+        new_callable=AsyncMock,
+    )
+    async def test_validate_upload_rejects_content_type_mismatch(
+        self, _mock_record_failed: AsyncMock
+    ) -> None:
         req = _request()
         upload = UploadFile(
             filename="board.png",
@@ -89,13 +115,18 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
             seen_reasons.append(rule.reason)
             return None
 
-        with patch("app.services.protection_service._enforce_fixed_window_rule", side_effect=_fake_enforce):
+        with patch(
+            "app.services.protection_service._enforce_fixed_window_rule",
+            side_effect=_fake_enforce,
+        ):
             response = await protection_service.enforce_global_limits(req, redis_client)
 
         self.assertIsNone(response)
         self.assertIn("solve_ip_rate_limit", seen_reasons)
 
-    async def test_solve_returns_solution_when_submission_persistence_fails(self) -> None:
+    async def test_solve_returns_solution_when_submission_persistence_fails(
+        self,
+    ) -> None:
         from app import main
 
         req = _request(path="/solve")
@@ -119,7 +150,9 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
                 "attempts_used": 1,
                 "raw_output": "{}",
             },
-        ), patch("app.main._resolve_stockfish_path_or_raise", return_value="stockfish"), patch(
+        ), patch(
+            "app.main._resolve_stockfish_path_or_raise", return_value="stockfish"
+        ), patch(
             "app.main.find_mate_in_1_to_3",
             return_value=mate_line,
         ), patch(
@@ -164,8 +197,14 @@ class GeminiHardeningTests(unittest.TestCase):
             clear=False,
         ):
             with patch("app.services.gemini_fen.genai.Client", return_value=object()):
-                with patch("app.services.gemini_fen._preprocess_image_variants", return_value=[(b"x", "image/png")]):
-                    with patch("app.services.gemini_fen._call_gemini_structured", side_effect=_always_fail):
+                with patch(
+                    "app.services.gemini_fen._preprocess_image_variants",
+                    return_value=[(b"x", "image/png")],
+                ):
+                    with patch(
+                        "app.services.gemini_fen._call_gemini_structured",
+                        side_effect=_always_fail,
+                    ):
                         with self.assertRaises(ValueError):
                             gemini_fen.fen_from_image_bytes(
                                 b"dummy",
