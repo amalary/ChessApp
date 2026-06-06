@@ -401,7 +401,13 @@ def _failure_block_key(actor: RequestActor) -> str:
 
 
 async def ensure_not_failure_blocked(request: Request) -> None:
-    redis_client = _require_redis_client(request)
+    redis_client = _optional_redis_client(request)
+    if redis_client is None:
+        logger.warning(
+            "Redis client missing; skipping failed solve block endpoint=%s",
+            request.url.path,
+        )
+        return
 
     actor = request_actor(request)
     blocked = await redis_client.ttl(_failure_block_key(actor))

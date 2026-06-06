@@ -82,6 +82,20 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("\\", result.filename)
         self.assertGreater(len(result.data), 0)
 
+    async def test_validate_upload_allows_solve_without_redis(self) -> None:
+        req = _request()
+        req.app.state.redis_client = None
+        upload = UploadFile(
+            filename="board.png",
+            file=BytesIO(_png_bytes()),
+            headers={"content-type": "image/png"},
+        )
+
+        result = await protection_service.validate_solve_upload(req, upload)
+
+        self.assertEqual(result.content_type, "image/png")
+        self.assertEqual(result.filename, "board.png")
+
     @patch(
         "app.services.protection_service.record_failed_solve_attempt",
         new_callable=AsyncMock,
