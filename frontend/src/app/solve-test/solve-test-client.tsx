@@ -888,7 +888,7 @@ export default function SolveTestClient() {
   }, [settingsStorageScope, theme]);
 
   const backendUrl = useMemo(() => {
-    return '/backend';
+    return process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://127.0.0.1:8010';
   }, []);
 
   useEffect(() => {
