@@ -320,6 +320,10 @@ def _pick_consensus_fen(
         "confidence": round(avg_conf, 4),
         "side_to_move": "white" if best_rows[0]["side"] == "w" else "black",
         "attempts_used": attempts_used if attempts_used is not None else len(rows),
+        "consensus_votes": len(best_rows),
+        "candidate_count": len(rows),
+        "unique_fen_count": len(groups),
+        "side_matches_expected": bool(best_rows[0].get("side_matches_expected")),
     }
     if include_raw_output:
         result["raw_output"] = selected_raw_output
@@ -330,24 +334,42 @@ def _pick_consensus_fen(
 
 def _public_candidates(candidates: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    groups: dict[str, list[dict[str, Any]]] = {}
     for item in candidates:
         fen = item.get("fen")
-        if not isinstance(fen, str) or not fen.strip() or fen in seen:
+        if not isinstance(fen, str) or not fen.strip():
             continue
-        seen.add(fen)
-        confidence = item.get("confidence")
+        groups.setdefault(fen, []).append(item)
+
+    for fen, fen_rows in groups.items():
+        confidences = [
+            float(item["confidence"])
+            for item in fen_rows
+            if isinstance(item.get("confidence"), (int, float))
+        ]
+        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+        representative = fen_rows[-1]
         rows.append(
             {
                 "fen": fen,
-                "confidence": (
-                    confidence if isinstance(confidence, (int, float)) else 0.0
+                "confidence": round(max(0.0, min(1.0, avg_confidence)), 4),
+                "side_to_move": (
+                    "white" if representative.get("side") == "w" else "black"
                 ),
-                "side_to_move": "white" if item.get("side") == "w" else "black",
-                "is_valid": bool(item.get("is_valid")),
-                "side_matches_expected": bool(item.get("side_matches_expected")),
+                "is_valid": any(bool(item.get("is_valid")) for item in fen_rows),
+                "side_matches_expected": bool(
+                    representative.get("side_matches_expected")
+                ),
+                "vote_count": len(fen_rows),
             }
         )
+    rows.sort(
+        key=lambda item: (
+            int(item.get("vote_count", 0)),
+            float(item.get("confidence", 0.0)),
+        ),
+        reverse=True,
+    )
     return rows
 
 
@@ -451,6 +473,12 @@ def fen_from_image_bytes(
                     "confidence": round(fen_avg_conf, 4),
                     "side_to_move": "white" if side == "w" else "black",
                     "attempts_used": idx + 1,
+                    "consensus_votes": fen_count,
+                    "candidate_count": len(valid_candidates),
+                    "unique_fen_count": len(
+                        {item["fen"] for item in valid_candidates}
+                    ),
+                    "side_matches_expected": side_matches_expected,
                 }
                 if include_raw_output:
                     result["raw_output"] = raw_output

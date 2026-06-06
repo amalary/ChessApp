@@ -253,7 +253,7 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["moves_san"], ["e4", "e5"])
         self.assertEqual(response["moves_uci"], ["e2e4", "e7e5"])
 
-    async def test_solve_prefers_engine_verified_mate_candidate(self) -> None:
+    async def test_solve_rejects_unstable_mate_candidate(self) -> None:
         from app import main
 
         req = _request(path="/solve")
@@ -287,12 +287,16 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
                         "confidence": 0.98,
                         "side_to_move": "black",
                         "is_valid": True,
+                        "side_matches_expected": True,
+                        "vote_count": 1,
                     },
                     {
                         "fen": mate_fen,
                         "confidence": 0.91,
                         "side_to_move": "white",
                         "is_valid": True,
+                        "side_matches_expected": True,
+                        "vote_count": 1,
                     },
                 ],
             },
@@ -310,19 +314,21 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "app.main.clear_failed_solve_attempts",
             new_callable=AsyncMock,
+        ), patch(
+            "app.main.record_failed_solve_attempt",
+            new_callable=AsyncMock,
         ):
-            response = await main.solve(
-                request=req,
-                current_user={"sub": "auth0|user"},
-                upload=upload,
-                _engine_guard=None,
-                db=SimpleNamespace(),
-            )
+            with self.assertRaises(HTTPException) as exc:
+                await main.solve(
+                    request=req,
+                    current_user={"sub": "auth0|user"},
+                    upload=upload,
+                    _engine_guard=None,
+                    db=SimpleNamespace(),
+                )
 
-        self.assertEqual(response["fen"], mate_fen)
-        self.assertTrue(response["mate_found"])
-        self.assertEqual(response["mate_in"], 1)
-        self.assertEqual(response["moves_san"], ["Qh8#"])
+        self.assertEqual(exc.exception.status_code, 422)
+        self.assertIn("Could not read the board reliably", exc.exception.detail)
 
 
 class GeminiHardeningTests(unittest.TestCase):
@@ -459,6 +465,9 @@ class GeminiHardeningTests(unittest.TestCase):
 
         self.assertEqual(len(result["candidates"]), 1)
         self.assertEqual(result["candidates"][0]["fen"], result["fen"])
+        self.assertEqual(result["candidates"][0]["vote_count"], 1)
+        self.assertEqual(result["consensus_votes"], 1)
+        self.assertEqual(result["unique_fen_count"], 1)
 
 
 if __name__ == "__main__":

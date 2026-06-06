@@ -44,6 +44,9 @@ from app.repositories.puzzle_submissions import PuzzleSubmissionCreate
 logger = logging.getLogger(__name__)
 INVALID_GEMINI_FEN_DETAIL = "Invalid FEN returned from Gemini"
 INVALID_POSITION_DETAIL = "Invalid chess position detected"
+UNCERTAIN_POSITION_DETAIL = (
+    "Could not read the board reliably. Please crop the board squarely and try again."
+)
 STOCKFISH_NOT_FOUND_DETAIL = (
     "Stockfish not found. Install Stockfish locally and set STOCKFISH_PATH "
     "to the executable path."
@@ -314,39 +317,81 @@ def _candidate_fens_from_gemini_result(gemini_result: dict) -> list[dict]:
     return unique_rows
 
 
-def _find_engine_verified_mate_candidate(
-    *,
-    gemini_result: dict,
-    stockfish_path: str,
-) -> tuple[dict, object] | None:
-    best: tuple[dict, object, int, float] | None = None
-    for row in _candidate_fens_from_gemini_result(gemini_result):
-        fen = row.get("fen")
-        if not isinstance(fen, str):
-            continue
-        try:
-            _validate_fen_or_raise(fen)
-            result = find_mate_in_1_to_3(
-                fen=fen,
-                stockfish_path=stockfish_path,
-                think_time_s=2.0,
-                max_mate=3,
-            )
-        except Exception:
-            continue
-        if result is None:
-            continue
-        confidence = row.get("confidence")
-        confidence_score = (
-            float(confidence) if isinstance(confidence, (int, float)) else 0.0
-        )
-        score = (3 - int(result.mate_in), confidence_score)
-        if best is None or score > (best[2], best[3]):
-            best = (row, result, score[0], score[1])
+def _matching_candidate_for_fen(gemini_result: dict, fen: str) -> dict | None:
+    candidates = gemini_result.get("candidates")
+    if isinstance(candidates, list):
+        for row in candidates:
+            if isinstance(row, dict) and row.get("fen") == fen:
+                return row
 
-    if best is None:
-        return None
-    return best[0], best[1]
+    selected_fen = gemini_result.get("fen")
+    if selected_fen == fen:
+        return {
+            "fen": selected_fen,
+            "confidence": gemini_result.get("confidence"),
+            "side_to_move": gemini_result.get("side_to_move"),
+            "is_valid": True,
+            "vote_count": gemini_result.get("consensus_votes"),
+            "side_matches_expected": gemini_result.get("side_matches_expected"),
+        }
+    return None
+
+
+def _as_positive_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, parsed)
+
+
+def _assert_stable_transcription_or_raise(gemini_result: dict) -> None:
+    candidates = gemini_result.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return
+
+    fen = gemini_result.get("fen")
+    if not isinstance(fen, str) or not fen.strip():
+        raise HTTPException(status_code=422, detail=UNCERTAIN_POSITION_DETAIL)
+
+    selected_row = _matching_candidate_for_fen(gemini_result, fen)
+    if selected_row is None:
+        raise HTTPException(status_code=422, detail=UNCERTAIN_POSITION_DETAIL)
+
+    attempts_used = _as_positive_int(gemini_result.get("attempts_used"), len(candidates))
+    configured_min_votes = max(1, _env_int("GEMINI_MIN_CONSENSUS_VOTES", 2))
+    required_votes = min(configured_min_votes, max(1, attempts_used))
+    selected_votes = _as_positive_int(
+        selected_row.get("vote_count"),
+        _as_positive_int(gemini_result.get("consensus_votes"), 1),
+    )
+    unique_fen_count = _as_positive_int(
+        gemini_result.get("unique_fen_count"),
+        len({row.get("fen") for row in candidates if isinstance(row, dict)}),
+    )
+
+    expected_side_was_checked = any(
+        isinstance(row, dict) and "side_matches_expected" in row for row in candidates
+    )
+    if expected_side_was_checked and not bool(selected_row.get("side_matches_expected")):
+        raise HTTPException(status_code=422, detail=UNCERTAIN_POSITION_DETAIL)
+
+    if selected_votes < required_votes:
+        raise HTTPException(status_code=422, detail=UNCERTAIN_POSITION_DETAIL)
+
+    if attempts_used >= configured_min_votes and unique_fen_count > 1:
+        top_votes = sorted(
+            (
+                _as_positive_int(row.get("vote_count"), 1)
+                for row in candidates
+                if isinstance(row, dict)
+            ),
+            reverse=True,
+        )
+        if len(top_votes) > 1 and top_votes[0] == top_votes[1]:
+            raise HTTPException(status_code=422, detail=UNCERTAIN_POSITION_DETAIL)
 
 
 def _resolve_stockfish_path_or_raise() -> str:
@@ -592,34 +637,19 @@ async def solve(
 
         # 2) Validate FEN
         _validate_fen_or_raise(fen)
+        _assert_stable_transcription_or_raise(gemini_result)
         fen_valid = True
 
         # 3) Run Stockfish
         stockfish_path = _resolve_stockfish_path_or_raise()
 
-        verified_mate = _find_engine_verified_mate_candidate(
-            gemini_result=gemini_result,
+        result = find_mate_in_1_to_3(
+            fen=fen,
             stockfish_path=stockfish_path,
+            think_time_s=2.0,
+            max_mate=3,
         )
-        if verified_mate is not None:
-            verified_row, result = verified_mate
-            fen = verified_row["fen"]
-            parsed_fen = fen
-            confidence = verified_row.get("confidence", confidence)
-            gemini_result["fen"] = fen
-            gemini_result["confidence"] = confidence
-            gemini_result["side_to_move"] = (
-                "white" if chess.Board(fen).turn else "black"
-            )
-            mate_found = True
-        else:
-            result = find_mate_in_1_to_3(
-                fen=fen,
-                stockfish_path=stockfish_path,
-                think_time_s=2.0,
-                max_mate=3,
-            )
-            mate_found = result is not None
+        mate_found = result is not None
         if result is None:
             result = find_best_engine_line(
                 fen=fen,
@@ -637,6 +667,8 @@ async def solve(
             "vision_confidence": confidence,
             "vision_side_to_move": gemini_result.get("side_to_move"),
             "vision_attempts_used": gemini_result.get("attempts_used"),
+            "vision_consensus_votes": gemini_result.get("consensus_votes"),
+            "vision_unique_fen_count": gemini_result.get("unique_fen_count"),
             "mate_found": mate_found,
             "mate_in": result.mate_in if mate_found and result else None,
             "moves_san": result.moves_san if result else [],
