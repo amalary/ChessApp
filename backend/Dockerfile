@@ -17,4 +17,5 @@ ENV STOCKFISH_PATH=/usr/games/stockfish
 
 EXPOSE 8080
 
+# Cloud Run sets PORT at runtime; run through sh so the default expands.
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
