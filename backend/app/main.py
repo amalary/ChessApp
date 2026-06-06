@@ -394,21 +394,28 @@ def _persist_local_auth_submission(
     )
 
 
-redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+redis_url = os.getenv("REDIS_URL", "").strip()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.redis_client = redis.from_url(
-        redis_url,
-        encoding="utf-8",
-        decode_responses=True,
-    )
-    try:
-        await app.state.redis_client.ping()
-    except Exception as exc:
-        logger.exception("Failed to connect to Redis at startup.")
-        raise RuntimeError("Redis is required for /solve rate limiting.") from exc
+    app.state.redis_client = None
+    if redis_url:
+        app.state.redis_client = redis.from_url(
+            redis_url,
+            encoding="utf-8",
+            decode_responses=True,
+        )
+        try:
+            await app.state.redis_client.ping()
+        except Exception:
+            logger.exception(
+                "Failed to connect to Redis at startup; continuing without Redis."
+            )
+            await app.state.redis_client.close()
+            app.state.redis_client = None
+    else:
+        logger.warning("REDIS_URL is not set; continuing without Redis.")
     try:
         yield
     finally:
