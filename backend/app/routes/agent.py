@@ -61,6 +61,7 @@ class ChatRequest(BaseModel):
     limit: int = Field(default=5, ge=1)
     conversation_history: list[dict] | None = Field(default=None)
     client_puzzle_history: list[dict] | None = Field(default=None)
+    client_analytics_context: dict | None = Field(default=None)
     active_referenced_puzzle_id: str | None = Field(default=None)
     conversation_mode: (
         Literal["coach", "rival", "grandmaster", "club_friend", "minimal"] | None
@@ -186,6 +187,66 @@ def _normalize_client_history_context(
     return deduped
 
 
+def _normalize_percent(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(round(float(value)))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(100, parsed))
+
+
+def _normalize_non_negative_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return max(0, parsed)
+
+
+def _normalize_client_analytics_context(context: dict | None) -> dict | None:
+    if not isinstance(context, dict):
+        return None
+
+    rows: list[dict] = []
+    raw_rows = context.get("themeAccuracy")
+    if isinstance(raw_rows, list):
+        for item in raw_rows[:12]:
+            if not isinstance(item, dict):
+                continue
+            theme = item.get("theme")
+            if not isinstance(theme, str) or not theme.strip():
+                continue
+            rows.append(
+                {
+                    "theme": theme.strip()[:80],
+                    "accuracyPercent": _normalize_percent(item.get("accuracyPercent")),
+                    "solvedCount": _normalize_non_negative_int(item.get("solvedCount"))
+                    or 0,
+                }
+            )
+
+    first_move_accuracy = _normalize_percent(context.get("firstMoveAccuracyPercent"))
+    total_recent = _normalize_non_negative_int(context.get("totalRecentSubmissions"))
+    weakest_theme = context.get("weakestTheme")
+    normalized = {
+        "totalRecentSubmissions": total_recent or 0,
+        "firstMoveAccuracyPercent": first_move_accuracy,
+        "weakestTheme": (
+            weakest_theme.strip()[:80]
+            if isinstance(weakest_theme, str) and weakest_theme.strip()
+            else None
+        ),
+        "themeAccuracy": rows,
+    }
+    if not rows and first_move_accuracy is None and total_recent is None:
+        return None
+    return normalized
+
+
 def _normalize_query_or_raise(query: str) -> str:
     raw_query = (query or "")[:MAX_RAW_QUERY_LENGTH]
     clean_query = WHITESPACE_PATTERN.sub(" ", raw_query).strip()
@@ -248,6 +309,9 @@ async def chat(
         client_history_context = _normalize_client_history_context(
             request.client_puzzle_history
         )
+        analytics_context = _normalize_client_analytics_context(
+            request.client_analytics_context
+        )
         user_profile_context: dict | None = None
         if local_auth_user is None:
             local_auth_user = get_optional_local_auth_user_from_current_user(
@@ -288,6 +352,7 @@ async def chat(
             request.limit,
             user_puzzle_history=merged_history_context,
             user_profile_context=user_profile_context,
+            user_analytics_context=analytics_context,
             conversation_history=request.conversation_history,
             conversation_mode=request.conversation_mode,
             active_referenced_puzzle_id=request.active_referenced_puzzle_id,

@@ -72,13 +72,6 @@ const DASHBOARD_PUZZLE_ELO_CATEGORIES = [
   { id: 'mate-in-3', label: 'Mate in 3', mateIn: 3 },
 ] as const;
 const ANALYTICS_THEMES = ['Forks', 'Pins', 'Back-Rank Mates', 'Sacrifices', 'Skewers'] as const;
-const ANALYTICS_BASELINE_ACCURACY: Record<(typeof ANALYTICS_THEMES)[number], number> = {
-  Forks: 85,
-  Pins: 60,
-  'Back-Rank Mates': 80,
-  Sacrifices: 45,
-  Skewers: 70,
-};
 const ANALYTICS_SECONDARY_SUBSECTIONS = [
   'Solve Time vs Difficulty',
   'Puzzle Rating Progression',
@@ -1862,11 +1855,10 @@ function buildThemeAccuracyRows(submissions: PuzzleSubmissionRecord[]): {
 
   const rows = ANALYTICS_THEMES.map((theme) => {
     const assessments = grouped.get(theme) ?? [];
-    const baseline = ANALYTICS_BASELINE_ACCURACY[theme];
     if (assessments.length === 0) {
       return {
         theme,
-        accuracyPercent: baseline,
+        accuracyPercent: 0,
         solvedCount: 0,
         assessments: [],
       };
@@ -1875,11 +1867,10 @@ function buildThemeAccuracyRows(submissions: PuzzleSubmissionRecord[]): {
     const liveAverage =
       assessments.reduce((sum, assessment) => sum + assessment.accuracyPercent, 0) /
       assessments.length;
-    const blendedAccuracy = clamp(Math.round(liveAverage * 0.82 + baseline * 0.18), 1, 100);
 
     return {
       theme,
-      accuracyPercent: blendedAccuracy,
+      accuracyPercent: clamp(Math.round(liveAverage), 1, 100),
       solvedCount: assessments.length,
       assessments,
     };

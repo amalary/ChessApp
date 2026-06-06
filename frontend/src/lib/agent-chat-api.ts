@@ -24,6 +24,7 @@ type AgentChatRequest = {
   limit?: number;
   conversationHistory?: Array<{ role: 'assistant' | 'user'; text: string }>;
   clientPuzzleHistory?: Array<Record<string, unknown>>;
+  clientAnalyticsContext?: Record<string, unknown> | null;
   activeReferencedPuzzleId?: string | null;
   conversationMode?: AssistantConversationMode;
   signal?: AbortSignal;
@@ -67,6 +68,7 @@ export async function requestAgentChat({
   limit = 5,
   conversationHistory,
   clientPuzzleHistory,
+  clientAnalyticsContext,
   activeReferencedPuzzleId,
   conversationMode,
   signal,
@@ -92,6 +94,7 @@ export async function requestAgentChat({
         limit,
         conversation_history: conversationHistory ?? null,
         client_puzzle_history: clientPuzzleHistory ?? null,
+        client_analytics_context: clientAnalyticsContext ?? null,
         active_referenced_puzzle_id: activeReferencedPuzzleId ?? null,
         conversation_mode: conversationMode ?? 'coach',
       }),

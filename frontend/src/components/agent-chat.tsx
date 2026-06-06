@@ -76,6 +76,7 @@ const SOLUTION_EXPLANATION_PATTERN =
   /\b(explain|explained|why|solution|solutions|line|lines|variation|variations|best move|best moves|analyze|analysis|review|go over|what was)\b/i;
 const HISTORY_INDEX_REFERENCE_PATTERN =
   /\b(previous|prior|ago|back|second|third|before that|one before that|one before last|second to last|third to last|older|earlier|latest|most recent|recent|last)\b/i;
+const ANALYTICS_CONTEXT_THEMES = ['Forks', 'Pins', 'Back-Rank Mates', 'Sacrifices', 'Skewers'] as const;
 
 function buildWelcomeMessage(conversationMode: AssistantConversationMode): AgentChatMessage {
   return {
@@ -245,6 +246,89 @@ function buildClientPuzzleHistory(
       submission.originalPuzzleImageDataUrl.startsWith('data:image/'),
     solutionLines: submission.solutionLines ?? [],
   }));
+}
+
+function inferAnalyticsTheme(submission: PuzzleSubmissionRecord): (typeof ANALYTICS_CONTEXT_THEMES)[number] {
+  const searchable = `${submission.fileName} ${submission.solutionLines.join(' ')}`.toLowerCase();
+  const sanLine = submission.solutionLines.join(' ');
+  const captureCount = (sanLine.match(/x/g) ?? []).length;
+
+  if (/\bback[-\s]?rank\b/.test(searchable) || /\b[QR][a-h]?[1-8]?x?[a-h][18]#\b/.test(sanLine)) {
+    return 'Back-Rank Mates';
+  }
+  if (/\bskewer(s)?\b|\bx[-\s]?ray\b/.test(searchable) || /\b[QRB][a-h]?[1-8]?x?[a-h][1-8]\+/.test(sanLine)) {
+    return 'Skewers';
+  }
+  if (/\bsacrific(e|es|ed|ing)?\b|\bdecoy\b|\bdeflection\b|\bclearance\b/.test(searchable) || captureCount >= 2) {
+    return 'Sacrifices';
+  }
+  if (/\bpin(s|ned|ning)?\b/.test(searchable) || /\b[QB][a-h]?[1-8]?x?[a-h][1-8]\+/.test(sanLine)) {
+    return 'Pins';
+  }
+  if (/\bfork(s|ed|ing)?\b/.test(searchable) || /\bN[a-h]?[1-8]?x?[a-h][1-8][+#]\b/.test(sanLine)) {
+    return 'Forks';
+  }
+
+  return ANALYTICS_CONTEXT_THEMES[
+    Math.abs(`${submission.id}|${submission.fileName}|${submission.submittedAt}`.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)) %
+      ANALYTICS_CONTEXT_THEMES.length
+  ];
+}
+
+function calculateAnalyticsAccuracyPercent(submission: PuzzleSubmissionRecord): number {
+  const assessment = submission.firstMoveAssessment;
+  if (assessment?.isValidForFirstMoveAccuracy === true) {
+    return assessment.isFirstMoveCorrect ? 100 : assessment.status === 'almost_correct' ? 60 : 0;
+  }
+  const confidence = submission.positionCheck?.confidence;
+  if (typeof confidence === 'number' && Number.isFinite(confidence)) {
+    return Math.min(100, Math.max(1, Math.round(confidence * 100)));
+  }
+  return 0;
+}
+
+function buildClientAnalyticsContext(submissions: PuzzleSubmissionRecord[]): Record<string, unknown> {
+  const recent = submissions.slice(0, 60);
+  const themeRows = ANALYTICS_CONTEXT_THEMES.map((theme) => {
+    const themed = recent.filter((submission) => inferAnalyticsTheme(submission) === theme);
+    const accuracyPercent =
+      themed.length > 0
+        ? Math.round(
+            themed.reduce((sum, submission) => sum + calculateAnalyticsAccuracyPercent(submission), 0) /
+              themed.length,
+          )
+        : 0;
+    return {
+      theme,
+      accuracyPercent,
+      solvedCount: themed.length,
+    };
+  });
+  const weakestTheme =
+    themeRows
+      .filter((row) => row.solvedCount > 0)
+      .sort((left, right) => left.accuracyPercent - right.accuracyPercent)[0]?.theme ?? null;
+  const validFirstMoves = recent
+    .map((submission) => submission.firstMoveAssessment ?? null)
+    .filter(
+      (assessment): assessment is NonNullable<PuzzleSubmissionRecord['firstMoveAssessment']> =>
+        assessment !== null && assessment.isValidForFirstMoveAccuracy,
+    );
+  const firstMoveAccuracyPercent =
+    validFirstMoves.length > 0
+      ? Math.round(
+          (validFirstMoves.filter((assessment) => assessment.isFirstMoveCorrect).length /
+            validFirstMoves.length) *
+            100,
+        )
+      : null;
+
+  return {
+    totalRecentSubmissions: recent.length,
+    firstMoveAccuracyPercent,
+    weakestTheme,
+    themeAccuracy: themeRows,
+  };
 }
 
 function resolveReferencedPuzzleById(
@@ -703,14 +787,18 @@ export function AgentChat({
     isError = false,
     referencedPuzzle: AgentReferencedPuzzle | null = null,
   ) => {
+    const rhythmSeed = `${Date.now()}:${rawText.length}:${userMessage.slice(0, 80)}`;
     const beats = buildConversationalBeats(rawText, {
       intent: isError ? 'status' : 'chat',
+      variantSeed: rhythmSeed,
     });
     if (beats.length === 0 || signal.aborted) {
       return;
     }
 
-    const schedule = buildBeatScheduleMs(beats, isError ? 'status' : 'chat');
+    const schedule = buildBeatScheduleMs(beats, isError ? 'status' : 'chat', {
+      variantSeed: rhythmSeed,
+    });
     const shouldUseReferenceRevealPrompt =
       !isError &&
       referencedPuzzle !== null &&
@@ -825,6 +913,7 @@ export function AgentChat({
         limit: 5,
         conversationHistory: buildConversationHistory(messages),
         clientPuzzleHistory: buildClientPuzzleHistory(effectiveSubmissions),
+        clientAnalyticsContext: buildClientAnalyticsContext(effectiveSubmissions),
         activeReferencedPuzzleId,
         conversationMode,
         signal: controller.signal,

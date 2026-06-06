@@ -260,6 +260,44 @@ class AgentChatGuardrailsTests(unittest.TestCase):
 
     @patch("app.services.agent_chat.retrieve_chunks")
     @patch("app.services.agent_chat._get_chat_client")
+    def test_prompt_includes_user_analytics_context(
+        self,
+        mock_get_client: MagicMock,
+        mock_retrieve: MagicMock,
+    ) -> None:
+        mock_retrieve.return_value = [
+            {
+                "source_file": "docs/analytics.md",
+                "chunk_index": 0,
+                "chunk_text": "Analytics explains theme accuracy and first move accuracy.",
+                "distance": 0.05,
+            }
+        ]
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text="Pins are your weakest theme."
+        )
+        mock_get_client.return_value = mock_client
+
+        agent_chat.generate_rag_answer(
+            "What is my weakest theme?",
+            user_puzzle_history=[{"fileName": "pin-study.png"}],
+            user_analytics_context={
+                "weakestTheme": "Pins",
+                "firstMoveAccuracyPercent": 62,
+                "themeAccuracy": [
+                    {"theme": "Pins", "accuracyPercent": 40, "solvedCount": 3}
+                ],
+            },
+        )
+
+        prompt = mock_client.models.generate_content.call_args.kwargs["contents"]
+        self.assertIn("USER ANALYTICS CONTEXT", prompt)
+        self.assertIn('"weakestTheme": "Pins"', prompt)
+        self.assertIn('"accuracyPercent": 40', prompt)
+
+    @patch("app.services.agent_chat.retrieve_chunks")
+    @patch("app.services.agent_chat._get_chat_client")
     def test_history_query_shortcuts_to_direct_answer_without_llm(
         self,
         mock_get_client: MagicMock,

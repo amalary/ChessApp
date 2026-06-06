@@ -628,9 +628,11 @@ export default function SolveTestClient() {
     (text: string, mode: AmyConversationMode) => {
       clearAmyTimers();
       const modeRhythm = AMY_MODE_CONFIG[mode].rhythm;
+      const rhythmSeed = `${Date.now()}:${mode}:${text.length}`;
       const beats = buildConversationalBeats(text, {
         intent: modeRhythm.beatIntent,
         maxBeats: modeRhythm.maxBeats,
+        variantSeed: rhythmSeed,
       });
       setCoachCueBeats([]);
       if (beats.length === 0) {
@@ -641,7 +643,9 @@ export default function SolveTestClient() {
 
       setAmyPhase('responding');
       setAmyIsTyping(true);
-      const schedule = buildBeatScheduleMs(beats, modeRhythm.scheduleIntent).map(
+      const schedule = buildBeatScheduleMs(beats, modeRhythm.scheduleIntent, {
+        variantSeed: rhythmSeed,
+      }).map(
         (delay, idx) => delay + idx * modeRhythm.beatOffsetMs,
       );
 

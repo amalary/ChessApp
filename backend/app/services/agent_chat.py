@@ -749,6 +749,18 @@ def _build_user_profile_context(profile: dict | None) -> str:
     return f"{serialized[:2500].rstrip()} ..."
 
 
+def _build_user_analytics_context(context: dict | None) -> str:
+    if not isinstance(context, dict):
+        return "(No user analytics context provided.)"
+    try:
+        serialized = json.dumps(context, ensure_ascii=True, sort_keys=True)
+    except Exception:
+        return "(No user analytics context provided.)"
+    if len(serialized) <= 2500:
+        return serialized
+    return f"{serialized[:2500].rstrip()} ..."
+
+
 def _build_conversation_history_context(history: list[dict] | None) -> str:
     if not isinstance(history, list) or not history:
         return "(No conversation history context provided.)"
@@ -919,6 +931,7 @@ def generate_rag_answer(
     limit: int = 5,
     user_puzzle_history: list[dict] | None = None,
     user_profile_context: dict | None = None,
+    user_analytics_context: dict | None = None,
     conversation_history: list[dict] | None = None,
     conversation_mode: str | None = None,
     active_referenced_puzzle_id: str | None = None,
@@ -1016,6 +1029,7 @@ def generate_rag_answer(
         "When ACTIVE REFERENCED PUZZLE CONTEXT is provided and the user says "
         "'that puzzle' or similar, anchor to that active puzzle.\n"
         "When the user asks about account/profile details, answer from USER PROFILE CONTEXT.\n"
+        "When the user asks about analytics, accuracy, progress, weakest themes, or training priorities, answer from USER ANALYTICS CONTEXT and USER PUZZLE HISTORY CONTEXT.\n"
         "When the user asks about product behavior or settings, answer from DOCUMENTATION CONTEXT.\n\n"
         f"CONVERSATIONAL MODE CONTEXT:\n{build_conversation_mode_context(mode)}\n\n"
         f"CONVERSATION HISTORY CONTEXT:\n{conversation_context}\n\n"
@@ -1023,6 +1037,7 @@ def generate_rag_answer(
         f"USER PUZZLE HISTORY CONTEXT:\n{_build_user_history_context(user_puzzle_history)}\n\n"
         f"ACTIVE REFERENCED PUZZLE CONTEXT:\n{_build_active_referenced_puzzle_context(user_puzzle_history, active_referenced_puzzle_id)}\n\n"
         f"USER PROFILE CONTEXT:\n{_build_user_profile_context(user_profile_context)}\n\n"
+        f"USER ANALYTICS CONTEXT:\n{_build_user_analytics_context(user_analytics_context)}\n\n"
         f"CONVERSATIONAL MEMORY CONTEXT:\n{build_prompt_memory_context(memory)}\n\n"
         f"EMOTIONAL COACHING CONTEXT:\n{build_prompt_emotional_context(emotional)}\n\n"
         f"USER QUESTION:\n{clean_query}"
@@ -1035,7 +1050,8 @@ def generate_rag_answer(
             contents=prompt,
             config={
                 "system_instruction": _build_system_prompt(mode),
-                "temperature": 0.3,
+                "temperature": 0.55,
+                "top_p": 0.9,
             },
         )
     except (genai_errors.APIError, genai_errors.ClientError) as exc:

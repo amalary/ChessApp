@@ -20,7 +20,9 @@ from app.services.agent_chat import FALLBACK_ANSWER, GeminiServiceError
 
 class AgentRoutesGuardrailsTests(unittest.TestCase):
     def setUp(self) -> None:
-        os.environ.setdefault("LOCAL_AUTH_SESSION_SECRET", "test-local-auth-session-secret")
+        os.environ.setdefault(
+            "LOCAL_AUTH_SESSION_SECRET", "test-local-auth-session-secret"
+        )
         app = FastAPI()
         install_api_error_handlers(app)
         app.include_router(router, prefix="/agent")
@@ -29,9 +31,9 @@ class AgentRoutesGuardrailsTests(unittest.TestCase):
         def _override_get_db():
             yield self.fake_db
 
-        app.dependency_overrides[get_optional_current_user] = (
-            lambda: {"sub": "auth0|test-user"}
-        )
+        app.dependency_overrides[get_optional_current_user] = lambda: {
+            "sub": "auth0|test-user"
+        }
         app.dependency_overrides[get_db] = _override_get_db
         self.client = TestClient(app, raise_server_exceptions=False)
 
@@ -173,12 +175,54 @@ class AgentRoutesGuardrailsTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        passed_history = mock_generate_rag_answer.call_args.kwargs["user_puzzle_history"]
+        passed_history = mock_generate_rag_answer.call_args.kwargs[
+            "user_puzzle_history"
+        ]
         self.assertIsInstance(passed_history, list)
         self.assertEqual(len(passed_history), 1)
         self.assertEqual(passed_history[0]["fileName"], "recent-puzzle.png")
         self.assertEqual(passed_history[0]["solveTimeMs"], 23000)
         self.assertFalse(passed_history[0]["hasPuzzleImage"])
+
+    @patch("app.routes.agent.generate_rag_answer")
+    def test_chat_passes_sanitized_client_analytics_context(
+        self,
+        mock_generate_rag_answer,
+    ) -> None:
+        mock_generate_rag_answer.return_value = {"answer": "ok"}
+
+        response = self.client.post(
+            "/agent/chat",
+            json={
+                "query": "What is my weakest theme?",
+                "client_analytics_context": {
+                    "totalRecentSubmissions": 8,
+                    "firstMoveAccuracyPercent": 62.4,
+                    "weakestTheme": "Pins",
+                    "themeAccuracy": [
+                        {
+                            "theme": "Forks",
+                            "accuracyPercent": 75,
+                            "solvedCount": 4,
+                        },
+                        {
+                            "theme": "Pins",
+                            "accuracyPercent": -10,
+                            "solvedCount": 2,
+                        },
+                    ],
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        analytics_context = mock_generate_rag_answer.call_args.kwargs[
+            "user_analytics_context"
+        ]
+        self.assertEqual(analytics_context["totalRecentSubmissions"], 8)
+        self.assertEqual(analytics_context["firstMoveAccuracyPercent"], 62)
+        self.assertEqual(analytics_context["weakestTheme"], "Pins")
+        self.assertEqual(analytics_context["themeAccuracy"][1]["accuracyPercent"], 0)
 
 
 if __name__ == "__main__":
