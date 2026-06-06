@@ -360,7 +360,9 @@ def _assert_stable_transcription_or_raise(gemini_result: dict) -> None:
     if selected_row is None:
         raise HTTPException(status_code=422, detail=UNCERTAIN_POSITION_DETAIL)
 
-    attempts_used = _as_positive_int(gemini_result.get("attempts_used"), len(candidates))
+    attempts_used = _as_positive_int(
+        gemini_result.get("attempts_used"), len(candidates)
+    )
     configured_min_votes = max(1, _env_int("GEMINI_MIN_CONSENSUS_VOTES", 2))
     required_votes = min(configured_min_votes, max(1, attempts_used))
     selected_votes = _as_positive_int(
@@ -375,7 +377,9 @@ def _assert_stable_transcription_or_raise(gemini_result: dict) -> None:
     expected_side_was_checked = any(
         isinstance(row, dict) and "side_matches_expected" in row for row in candidates
     )
-    if expected_side_was_checked and not bool(selected_row.get("side_matches_expected")):
+    if expected_side_was_checked and not bool(
+        selected_row.get("side_matches_expected")
+    ):
         raise HTTPException(status_code=422, detail=UNCERTAIN_POSITION_DETAIL)
 
     if selected_votes < required_votes:

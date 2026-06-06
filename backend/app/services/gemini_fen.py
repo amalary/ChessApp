@@ -475,9 +475,7 @@ def fen_from_image_bytes(
                     "attempts_used": idx + 1,
                     "consensus_votes": fen_count,
                     "candidate_count": len(valid_candidates),
-                    "unique_fen_count": len(
-                        {item["fen"] for item in valid_candidates}
-                    ),
+                    "unique_fen_count": len({item["fen"] for item in valid_candidates}),
                     "side_matches_expected": side_matches_expected,
                 }
                 if include_raw_output:
