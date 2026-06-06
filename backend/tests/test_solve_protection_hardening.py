@@ -124,6 +124,17 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(response)
         self.assertIn("solve_ip_rate_limit", seen_reasons)
 
+    async def test_engine_lock_allows_solve_without_redis(self) -> None:
+        req = _request(path="/solve")
+        req.app.state.redis_client = None
+
+        lock_context = protection_service.enforce_engine_lock(req)
+        yielded = await lock_context.__anext__()
+
+        self.assertIsNone(yielded)
+        with self.assertRaises(StopAsyncIteration):
+            await lock_context.__anext__()
+
     async def test_solve_returns_solution_when_submission_persistence_fails(
         self,
     ) -> None:

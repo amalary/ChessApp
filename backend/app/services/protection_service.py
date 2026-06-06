@@ -485,7 +485,15 @@ class EngineLock:
 
 
 async def enforce_engine_lock(request: Request) -> AsyncGenerator[None, None]:
-    redis_client = _require_redis_client(request)
+    redis_client = _optional_redis_client(request)
+    if redis_client is None:
+        logger.warning(
+            "Redis client missing; skipping solve engine lock endpoint=%s",
+            request.url.path,
+        )
+        yield
+        return
+
     actor = request_actor(request)
     lock = EngineLock(redis_client=redis_client, actor=actor)
     await lock.acquire(request)

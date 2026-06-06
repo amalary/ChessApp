@@ -174,6 +174,7 @@ stage('Lint: Frontend') {
             IMAGE_PREFIX="${REGISTRY}/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}"
             BACKEND_IMAGE="${IMAGE_PREFIX}/backend:${IMAGE_TAG}"
             FRONTEND_IMAGE="${IMAGE_PREFIX}/frontend:${IMAGE_TAG}"
+            CLOUD_SQL_INSTANCE="${GCP_PROJECT_ID}:us-west2:chess-app-project"
 
             gcloud auth activate-service-account --key-file="${GCP_SERVICE_ACCOUNT_KEY_FILE}"
             gcloud config set project "${GCP_PROJECT_ID}"
@@ -183,7 +184,10 @@ stage('Lint: Frontend') {
               --region "${GCP_REGION}" \
               --platform managed \
               --port 8080 \
-              --allow-unauthenticated
+              --allow-unauthenticated \
+              --add-cloudsql-instances "${CLOUD_SQL_INSTANCE}" \
+              --update-secrets "DB_PASSWORD=chess-db-pass:latest,GOOGLE_API_KEY=gemini-api-key:latest,AUTH0_CLIENT_ID=chessapp-auth0-client-id:latest,AUTH0_CLIENT_SECRET=chessapp-auth0-client-secret:latest,AUTH0_SECRET=chessapp-auth0-secret:latest,LOCAL_AUTH_SESSION_SECRET=chessapp-auth0-secret:latest" \
+              --set-env-vars "APP_ENV=production,DB_NAME=chessapp,DB_USER=app_user,CLOUD_SQL_CONNECTION_NAME=${CLOUD_SQL_INSTANCE},STOCKFISH_PATH=/usr/games/stockfish,AUTH0_DOMAIN=dev-67f56xwhohhonhmt.us.auth0.com,AUTH0_AUDIENCE=https://chessapp-backend,ALLOW_LOCAL_AUTH_FALLBACK=true,SYNC_LOCAL_AUTH_WITH_AUTH0=false"
 
             gcloud run deploy "${FRONTEND_SERVICE}" \
               --image "${FRONTEND_IMAGE}" \
