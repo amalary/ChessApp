@@ -370,6 +370,7 @@ def fen_from_image_bytes(
                 )
                 continue
 
+            side_for_fen = expected or side
             side_matches_expected = (expected is None) or (side == expected)
             if expected and not side_matches_expected:
                 last_error = (
@@ -380,7 +381,7 @@ def fen_from_image_bytes(
                     "Re-evaluate board_map carefully, but still return your best board_map."
                 )
 
-            fen = _board_map_to_fen(board_map, side)
+            fen = _board_map_to_fen(board_map, side_for_fen)
             confidence_raw = data.get("confidence", 0.0)
             try:
                 confidence = float(confidence_raw)
@@ -391,7 +392,7 @@ def fen_from_image_bytes(
                 {
                     "fen": fen,
                     "confidence": max(0.0, min(1.0, confidence)),
-                    "side": side,
+                    "side": side_for_fen,
                     "is_valid": validate_fen(fen).passed,
                     "side_matches_expected": side_matches_expected,
                     "raw_output": raw_output,

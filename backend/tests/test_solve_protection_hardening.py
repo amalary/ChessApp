@@ -262,6 +262,44 @@ class GeminiHardeningTests(unittest.TestCase):
                     correction_message=None,
                 )
 
+    def test_expected_side_overrides_gemini_reported_side(self) -> None:
+        board_map = {square: "." for square in gemini_fen.SQUARES}
+        board_map.update({"g8": "k", "g1": "K", "h1": "Q"})
+
+        with patch.dict(
+            os.environ,
+            {
+                "GOOGLE_API_KEY": "test-key",
+                "GEMINI_TRANSCRIBE_ATTEMPTS": "1",
+                "GEMINI_MAX_ATTEMPTS_HARD_CAP": "1",
+            },
+            clear=False,
+        ):
+            with patch("app.services.gemini_fen.genai.Client", return_value=object()):
+                with patch(
+                    "app.services.gemini_fen._preprocess_image_variants",
+                    return_value=[(b"x", "image/png")],
+                ):
+                    with patch(
+                        "app.services.gemini_fen._call_gemini_structured",
+                        return_value={
+                            "side_to_move": "black",
+                            "confidence": 0.9,
+                            "board_map": board_map,
+                            "_raw_output": "{}",
+                        },
+                    ):
+                        result = gemini_fen.fen_from_image_bytes(
+                            b"dummy",
+                            filename="board.png",
+                            expected_side_to_move="white",
+                            attempts=1,
+                            include_raw_output=True,
+                        )
+
+        self.assertEqual(result["fen"], "6k1/8/8/8/8/8/8/6KQ w - - 0 1")
+        self.assertEqual(result["side_to_move"], "white")
+
 
 if __name__ == "__main__":
     unittest.main()
