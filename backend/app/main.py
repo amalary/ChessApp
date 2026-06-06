@@ -26,6 +26,8 @@ from app.middleware.rate_limit_middleware import rate_limit_middleware
 from app.models_auth import LocalAuthUser
 from app.routes.agent import router as agent_router
 from app.routers import assistant, auth, health, puzzles
+from app.services.board_position_service import CandidateBoard, validate_fen
+from app.services.candidate_ranker import rank_candidates
 from app.services.gemini_fen import fen_from_image_bytes
 from app.services.mate_solver import find_best_engine_line, find_mate_in_1_to_3
 from app.services.puzzle_submission_service import create_submission_for_user
@@ -160,6 +162,12 @@ def _normalize_uci_move(value: str | None) -> str | None:
     if not UCI_MOVE_PATTERN.fullmatch(candidate):
         return None
     return candidate
+
+
+def _form_value_or_none(value: object) -> object | None:
+    if value is None or isinstance(value, (str, int, float)):
+        return value
+    return None
 
 
 def _extract_first_uci_move(result: object | None) -> str | None:
@@ -306,15 +314,180 @@ def _candidate_fens_from_gemini_result(gemini_result: dict) -> list[dict]:
             },
         )
 
-    unique_rows: list[dict] = []
-    seen: set[str] = set()
+    merged_by_fen: dict[str, dict] = {}
+    order: list[str] = []
     for row in rows:
         fen = row.get("fen")
-        if not isinstance(fen, str) or not fen.strip() or fen in seen:
+        if not isinstance(fen, str) or not fen.strip():
+            continue
+        if fen not in merged_by_fen:
+            merged_by_fen[fen] = {"fen": fen}
+            order.append(fen)
+        merged = merged_by_fen[fen]
+        for key, value in row.items():
+            if value is not None:
+                merged[key] = value
+
+    unique_rows: list[dict] = []
+    seen: set[str] = set()
+    for fen in order:
+        if fen in seen:
             continue
         seen.add(fen)
-        unique_rows.append(row)
+        unique_rows.append(merged_by_fen[fen])
     return unique_rows
+
+
+def _candidate_confidence(row: dict) -> float:
+    try:
+        return max(0.0, min(1.0, float(row.get("confidence", 0.0))))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _candidate_vote_count(row: dict) -> int:
+    return _as_positive_int(row.get("vote_count"), 1) or 1
+
+
+def _bounded_solver_time(
+    name: str, default: float, minimum: float, maximum: float
+) -> float:
+    return max(minimum, min(maximum, _env_float(name, default)))
+
+
+def _candidate_rows_for_engine_selection(gemini_result: dict) -> list[dict]:
+    rows = _candidate_fens_from_gemini_result(gemini_result)
+    attempts_used = _as_positive_int(gemini_result.get("attempts_used"), len(rows))
+    required_votes = min(
+        max(1, _env_int("GEMINI_MIN_CONSENSUS_VOTES", 2)),
+        max(1, attempts_used),
+    )
+
+    stable_rows: list[dict] = []
+    for row in rows:
+        if row.get("is_valid") is False:
+            continue
+        if "side_matches_expected" in row and not bool(
+            row.get("side_matches_expected")
+        ):
+            continue
+        if _candidate_vote_count(row) < required_votes:
+            continue
+        stable_rows.append(row)
+
+    if not stable_rows:
+        selected_fen = gemini_result.get("fen")
+        selected = next(
+            (
+                row
+                for row in rows
+                if isinstance(selected_fen, str) and row.get("fen") == selected_fen
+            ),
+            None,
+        )
+        return [selected] if selected is not None else []
+
+    stable_rows.sort(
+        key=lambda row: (_candidate_vote_count(row), _candidate_confidence(row)),
+        reverse=True,
+    )
+    limit = max(1, _env_int("SOLVER_CANDIDATE_EVALUATION_LIMIT", 4))
+    return stable_rows[:limit]
+
+
+def _candidate_board_from_row(row: dict) -> CandidateBoard | None:
+    fen = row.get("fen")
+    if not isinstance(fen, str) or not fen.strip():
+        return None
+    validation = validate_fen(fen)
+    if not validation.passed:
+        return None
+
+    side = row.get("side_to_move")
+    if not isinstance(side, str) or not side.strip():
+        try:
+            side = "white" if chess.Board(fen).turn else "black"
+        except Exception:
+            side = ""
+
+    return CandidateBoard(
+        fen=fen,
+        source="gemini_consensus_candidate",
+        board_map={},
+        side_to_move=side,
+        repair_applied=False,
+        validation=validation,
+        confidence=_candidate_confidence(row),
+        uncertain_squares=[],
+    )
+
+
+def _apply_candidate_selection(gemini_result: dict, candidate: CandidateBoard) -> None:
+    row = _matching_candidate_for_fen(gemini_result, candidate.fen)
+    gemini_result["fen"] = candidate.fen
+    gemini_result["confidence"] = candidate.confidence
+    gemini_result["side_to_move"] = candidate.side_to_move
+    if isinstance(row, dict):
+        if "vote_count" in row:
+            gemini_result["consensus_votes"] = row.get("vote_count")
+        if "side_matches_expected" in row:
+            gemini_result["side_matches_expected"] = row.get("side_matches_expected")
+
+
+def _find_best_verified_candidate(
+    *,
+    gemini_result: dict,
+    stockfish_path: str,
+    selected_fen: str,
+    side_hint: str | None,
+    mate_think_time_s: float,
+) -> tuple[CandidateBoard | None, object | None]:
+    rows = _candidate_rows_for_engine_selection(gemini_result)
+    candidates = [
+        candidate
+        for row in rows
+        if (candidate := _candidate_board_from_row(row)) is not None
+    ]
+    if not candidates:
+        return None, None
+
+    selected_candidate = next(
+        (candidate for candidate in candidates if candidate.fen == selected_fen),
+        None,
+    )
+    if selected_candidate is None:
+        selected_row = _matching_candidate_for_fen(gemini_result, selected_fen)
+        if selected_row is not None:
+            selected_candidate = _candidate_board_from_row(selected_row)
+            if selected_candidate is not None:
+                candidates.append(selected_candidate)
+
+    mate_by_fen: dict[str, object | None] = {}
+    for candidate in candidates:
+        if candidate.fen in mate_by_fen:
+            continue
+        mate_by_fen[candidate.fen] = find_mate_in_1_to_3(
+            fen=candidate.fen,
+            stockfish_path=stockfish_path,
+            think_time_s=mate_think_time_s,
+            max_mate=3,
+        )
+
+    ranked = rank_candidates(
+        candidates,
+        mate_by_fen=mate_by_fen,
+        side_hint=side_hint,
+    )
+    if not ranked:
+        return selected_candidate, None
+
+    top = ranked[0]
+    selected_mate = mate_by_fen.get(selected_fen)
+    if top.candidate.fen != selected_fen and top.mate_line is not None:
+        return top.candidate, top.mate_line
+    if selected_candidate is not None:
+        return selected_candidate, selected_mate
+    return top.candidate, top.mate_line
 
 
 def _matching_candidate_for_fen(gemini_result: dict, fen: str) -> dict | None:
@@ -701,6 +874,13 @@ async def solve(
     final_response: dict | None = None
     error_message: str | None = None
     try:
+        expected_side_to_move = _form_value_or_none(expected_side_to_move)  # type: ignore[assignment]
+        first_move_uci = _form_value_or_none(first_move_uci)  # type: ignore[assignment]
+        time_to_first_move_seconds = _form_value_or_none(time_to_first_move_seconds)  # type: ignore[assignment]
+        difficulty_rating = _form_value_or_none(difficulty_rating)  # type: ignore[assignment]
+        puzzle_id = _form_value_or_none(puzzle_id)  # type: ignore[assignment]
+        attempt_id = _form_value_or_none(attempt_id)  # type: ignore[assignment]
+        attempt_created_at = _form_value_or_none(attempt_created_at)  # type: ignore[assignment]
         image_bytes = upload.data
 
         # 1) Gemini Vision -> FEN
@@ -721,21 +901,39 @@ async def solve(
         _assert_stable_transcription_or_raise(gemini_result)
         fen_valid = True
 
-        # 3) Run Stockfish
+        # 3) Run Stockfish across stable readings and prefer verified short mates.
         stockfish_path = _resolve_stockfish_path_or_raise()
-
-        result = find_mate_in_1_to_3(
-            fen=fen,
-            stockfish_path=stockfish_path,
-            think_time_s=2.0,
-            max_mate=3,
+        mate_think_time_s = _bounded_solver_time(
+            "SOLVER_MATE_THINK_TIME_SECONDS",
+            default=12.0,
+            minimum=1.0,
+            maximum=30.0,
         )
+        best_line_think_time_s = _bounded_solver_time(
+            "SOLVER_BEST_LINE_THINK_TIME_SECONDS",
+            default=8.0,
+            minimum=1.0,
+            maximum=20.0,
+        )
+        selected_candidate, result = _find_best_verified_candidate(
+            gemini_result=gemini_result,
+            stockfish_path=stockfish_path,
+            selected_fen=fen,
+            side_hint=expected_side_to_move,
+            mate_think_time_s=mate_think_time_s,
+        )
+        if selected_candidate is not None and selected_candidate.fen != fen:
+            _apply_candidate_selection(gemini_result, selected_candidate)
+            fen = selected_candidate.fen
+            parsed_fen = fen
+            confidence = gemini_result["confidence"]
+
         mate_found = result is not None
         if result is None:
             result = find_best_engine_line(
                 fen=fen,
                 stockfish_path=stockfish_path,
-                think_time_s=1.5,
+                think_time_s=best_line_think_time_s,
             )
         stockfish_best_move = _extract_first_uci_move(result)
         stockfish_mate_depth = result.mate_in if mate_found and result else None

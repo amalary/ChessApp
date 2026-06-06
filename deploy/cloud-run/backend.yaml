@@ -13,7 +13,7 @@ spec:
     spec:
       serviceAccountName: chessapp-backend-sa@PROJECT_ID.iam.gserviceaccount.com
       containerConcurrency: 20
-      timeoutSeconds: 60
+      timeoutSeconds: 180
       containers:
         - image: REGION-docker.pkg.dev/PROJECT_ID/chessapp/backend:latest
           ports:
@@ -61,6 +61,12 @@ spec:
               value: "1400"
             - name: GEMINI_IMAGE_MAX_DIMENSION
               value: "2200"
+            - name: SOLVER_MATE_THINK_TIME_SECONDS
+              value: "12"
+            - name: SOLVER_BEST_LINE_THINK_TIME_SECONDS
+              value: "8"
+            - name: SOLVER_CANDIDATE_EVALUATION_LIMIT
+              value: "4"
             - name: AGENT_FAIL_OPEN_ON_RETRIEVAL_ERRORS
               value: "true"
             - name: AUTH0_DOMAIN

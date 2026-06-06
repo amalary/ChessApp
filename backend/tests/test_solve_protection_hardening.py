@@ -334,6 +334,87 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc.exception.status_code, 422)
         self.assertIn("Could not read the board reliably", exc.exception.detail)
 
+    async def test_solve_prefers_stable_engine_verified_mate_candidate(self) -> None:
+        from app import main
+
+        req = _request(path="/solve")
+        upload = protection_service.ValidatedSolveUpload(
+            data=_png_bytes(),
+            filename="board.png",
+            content_type="image/png",
+        )
+        consensus_fen = "6k1/5ppp/8/8/8/8/5PPP/6KQ w - - 0 1"
+        mate_fen = "6k1/5ppp/8/8/8/8/5PPQ/6K1 w - - 0 1"
+        mate_line = SimpleNamespace(
+            mate_in=1,
+            moves_san=["Qh7#"],
+            moves_uci=["h2h7"],
+        )
+        best_line = SimpleNamespace(
+            mate_in=None,
+            moves_san=["Qh4"],
+            moves_uci=["h1h4"],
+        )
+
+        def _mate_for_candidate(*, fen: str, **_kwargs):
+            return mate_line if fen == mate_fen else None
+
+        with patch(
+            "app.main.fen_from_image_bytes",
+            return_value={
+                "fen": consensus_fen,
+                "confidence": 0.93,
+                "side_to_move": "white",
+                "attempts_used": 5,
+                "raw_output": "{}",
+                "candidates": [
+                    {
+                        "fen": consensus_fen,
+                        "confidence": 0.93,
+                        "side_to_move": "white",
+                        "is_valid": True,
+                        "side_matches_expected": True,
+                        "vote_count": 3,
+                    },
+                    {
+                        "fen": mate_fen,
+                        "confidence": 0.9,
+                        "side_to_move": "white",
+                        "is_valid": True,
+                        "side_matches_expected": True,
+                        "vote_count": 2,
+                    },
+                ],
+            },
+        ), patch(
+            "app.main._resolve_stockfish_path_or_raise", return_value="stockfish"
+        ), patch(
+            "app.main.find_mate_in_1_to_3",
+            side_effect=_mate_for_candidate,
+        ) as mock_mate, patch(
+            "app.main.find_best_engine_line",
+            return_value=best_line,
+        ), patch(
+            "app.main.get_optional_local_auth_user_from_current_user",
+            return_value=None,
+        ), patch(
+            "app.main.clear_failed_solve_attempts",
+            new_callable=AsyncMock,
+        ):
+            response = await main.solve(
+                request=req,
+                current_user={"sub": "auth0|user"},
+                upload=upload,
+                _engine_guard=None,
+                db=SimpleNamespace(),
+            )
+
+        self.assertEqual(response["fen"], mate_fen)
+        self.assertTrue(response["mate_found"])
+        self.assertEqual(response["mate_in"], 1)
+        self.assertEqual(response["moves_san"], ["Qh7#"])
+        self.assertGreaterEqual(mock_mate.call_count, 2)
+
 
 class GeminiHardeningTests(unittest.TestCase):
     def test_preprocess_variants_preserve_original_and_upscale_small_crop(self) -> None:
