@@ -89,6 +89,7 @@ stage('Lint: Frontend') {
           REDIS_NAME="${CONTAINER_NAME}-redis"
           CURL_NAME="${CONTAINER_NAME}-curl"
           NETWORK_NAME="chess-smoke-net-${BUILD_NUMBER}"
+          BACKEND_IP=""
           docker rm -f "${CONTAINER_NAME}" "${REDIS_NAME}" "${CURL_NAME}" >/dev/null 2>&1 || true
           docker network rm "${NETWORK_NAME}" >/dev/null 2>&1 || true
 
@@ -114,13 +115,10 @@ stage('Lint: Frontend') {
             echo "Backend smoke diagnostics: backend listening sockets"
             docker exec "${CONTAINER_NAME}" sh -c 'ss -ltnp || netstat -ltnp || true' || true
 
-            echo "Backend smoke diagnostics: curl -v"
-            docker rm -f "${CURL_NAME}" >/dev/null 2>&1 || true
-            docker run --rm \
-              --name "${CURL_NAME}" \
-              --network "${NETWORK_NAME}" \
-              curlimages/curl:8.10.1 \
-              -v http://backend:8080/ || true
+            if [ -n "${BACKEND_IP}" ]; then
+              echo "Backend smoke diagnostics: curl -v http://${BACKEND_IP}:8080/"
+              curl -v "http://${BACKEND_IP}:8080/" || true
+            fi
           }
 
           docker network create "${NETWORK_NAME}"
@@ -150,13 +148,15 @@ stage('Lint: Frontend') {
             -e REDIS_URL="redis://redis:6379/0" \
             "${DOCKERHUB_USR}/puzzle-backend:latest"
 
+          BACKEND_IP=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${CONTAINER_NAME}")
+          if [ -z "${BACKEND_IP}" ]; then
+            echo "Could not determine backend container IP for smoke test."
+            dump_backend_smoke_diagnostics
+            exit 1
+          fi
+
           for i in $(seq 1 30); do
-            docker rm -f "${CURL_NAME}" >/dev/null 2>&1 || true
-            if docker run --rm \
-              --name "${CURL_NAME}" \
-              --network "${NETWORK_NAME}" \
-              curlimages/curl:8.10.1 \
-              -vfsS http://backend:8080/; then
+            if curl -fsS "http://${BACKEND_IP}:8080/"; then
               exit 0
             fi
             sleep 1
