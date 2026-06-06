@@ -49,6 +49,14 @@ spec:
                   key: latest
             - name: GEMINI_MODEL
               value: gemini-2.5-flash
+            - name: GEMINI_TRANSCRIBE_ATTEMPTS
+              value: "7"
+            - name: GEMINI_MAX_ATTEMPTS_HARD_CAP
+              value: "7"
+            - name: GEMINI_MIN_CONSENSUS_VOTES
+              value: "2"
+            - name: GEMINI_CONSENSUS_EXIT_VOTES
+              value: "3"
             - name: AUTH0_DOMAIN
               valueFrom:
                 secretKeyRef:

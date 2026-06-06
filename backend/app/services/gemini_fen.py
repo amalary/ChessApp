@@ -36,6 +36,12 @@ Given one chessboard image, return ONLY JSON with this exact schema:
 
 Rules:
 - board_map must contain all 64 squares from a8 to h1.
+- Use board coordinates visible in the image when present.
+- Only mark a piece on a square when a piece is visibly present on that square.
+- Do not infer missing pieces from a normal starting position, opening pattern, material balance, or likely chess logic.
+- If a square appears empty, return "." even if a piece would commonly occupy that square.
+- Highlighted squares, arrows, last-move markers, coordinate text, usernames, clocks, and UI controls are not pieces.
+- If uncertain, prefer the visible image evidence over chess plausibility and lower confidence.
 - Use exactly one symbol per square:
   K,Q,R,B,N,P for white pieces
   k,q,r,b,n,p for black pieces
