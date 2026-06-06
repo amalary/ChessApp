@@ -888,7 +888,7 @@ export default function SolveTestClient() {
   }, [settingsStorageScope, theme]);
 
   const backendUrl = useMemo(() => {
-    return process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://127.0.0.1:8010';
+    return '/backend';
   }, []);
 
   useEffect(() => {
@@ -1206,7 +1206,7 @@ export default function SolveTestClient() {
     } catch (err: unknown) {
       const message =
         err instanceof TypeError && err.message.toLowerCase().includes('fetch')
-          ? `Cannot reach solver backend at ${backendUrl}. Start backend and verify ${backendUrl}/health returns {"status":"ok"}.`
+          ? `Browser could not connect to the solver at ${backendUrl}. Verify ${backendUrl}/health returns {"status":"ok"}, then check CORS/CSP for this frontend origin.`
           : err instanceof Error
             ? err.message
             : 'Network error';

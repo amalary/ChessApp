@@ -222,7 +222,7 @@ stage('Lint: Frontend') {
         expression { return params.DEPLOY_TO_CLOUD_RUN }
       }
       steps {
-        sh 'curl -fsS https://chess-backend-580461236477.us-central1.run.app/'
+        sh 'curl -fsS "${BACKEND_BASE_URL}/health"'
       }
     }
   }
