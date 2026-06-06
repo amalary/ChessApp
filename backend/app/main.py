@@ -422,6 +422,30 @@ def _candidate_board_from_row(row: dict) -> CandidateBoard | None:
     )
 
 
+def _promote_best_valid_candidate(gemini_result: dict) -> CandidateBoard | None:
+    rows = _candidate_fens_from_gemini_result(gemini_result)
+    candidates = [
+        candidate
+        for row in rows
+        if (candidate := _candidate_board_from_row(row)) is not None
+    ]
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda candidate: (
+            _candidate_vote_count(
+                _matching_candidate_for_fen(gemini_result, candidate.fen) or {}
+            ),
+            candidate.confidence,
+        ),
+        reverse=True,
+    )
+    candidate = candidates[0]
+    _apply_candidate_selection(gemini_result, candidate)
+    return candidate
+
+
 def _apply_candidate_selection(gemini_result: dict, candidate: CandidateBoard) -> None:
     row = _matching_candidate_for_fen(gemini_result, candidate.fen)
     gemini_result["fen"] = candidate.fen
@@ -897,7 +921,17 @@ async def solve(
         confidence = gemini_result["confidence"]
 
         # 2) Validate FEN
-        _validate_fen_or_raise(fen)
+        try:
+            _validate_fen_or_raise(fen)
+        except HTTPException as exc:
+            if exc.status_code != 422:
+                raise
+            selected_candidate = _promote_best_valid_candidate(gemini_result)
+            if selected_candidate is None:
+                raise
+            fen = selected_candidate.fen
+            parsed_fen = fen
+            confidence = gemini_result["confidence"]
         _assert_stable_transcription_or_raise(gemini_result)
         fen_valid = True
 

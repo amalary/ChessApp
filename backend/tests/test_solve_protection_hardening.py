@@ -334,6 +334,80 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc.exception.status_code, 422)
         self.assertIn("Could not read the board reliably", exc.exception.detail)
 
+    async def test_solve_promotes_valid_candidate_when_selected_fen_is_invalid(
+        self,
+    ) -> None:
+        from app import main
+
+        req = _request(path="/solve")
+        upload = protection_service.ValidatedSolveUpload(
+            data=_png_bytes(),
+            filename="board.png",
+            content_type="image/png",
+        )
+        invalid_selected_fen = "7k/5pp1/8/8/8/8/5PP1/6KQ w - - 0 1"
+        valid_candidate_fen = "7k/5pp1/8/8/8/8/5PP1/6KQ b - - 0 1"
+        mate_line = SimpleNamespace(
+            mate_in=1,
+            moves_san=["Qh4#"],
+            moves_uci=["h1h4"],
+        )
+
+        with patch(
+            "app.main.fen_from_image_bytes",
+            return_value={
+                "fen": invalid_selected_fen,
+                "confidence": 0.95,
+                "side_to_move": "black",
+                "attempts_used": 5,
+                "raw_output": "{}",
+                "candidates": [
+                    {
+                        "fen": invalid_selected_fen,
+                        "confidence": 0.95,
+                        "side_to_move": "black",
+                        "is_valid": False,
+                        "side_matches_expected": True,
+                        "vote_count": 3,
+                    },
+                    {
+                        "fen": valid_candidate_fen,
+                        "confidence": 0.91,
+                        "side_to_move": "white",
+                        "is_valid": True,
+                        "side_matches_expected": True,
+                        "vote_count": 2,
+                    },
+                ],
+            },
+        ), patch(
+            "app.main._resolve_stockfish_path_or_raise", return_value="stockfish"
+        ), patch(
+            "app.main.find_mate_in_1_to_3",
+            return_value=mate_line,
+        ), patch(
+            "app.main.get_optional_local_auth_user_from_current_user",
+            return_value=None,
+        ), patch(
+            "app.main.clear_failed_solve_attempts",
+            new_callable=AsyncMock,
+        ), patch(
+            "app.main.record_failed_solve_attempt",
+            new_callable=AsyncMock,
+        ) as mock_record_failed:
+            response = await main.solve(
+                request=req,
+                current_user={"sub": "auth0|user"},
+                upload=upload,
+                _engine_guard=None,
+                db=SimpleNamespace(),
+            )
+
+        self.assertEqual(response["fen"], valid_candidate_fen)
+        self.assertTrue(response["mate_found"])
+        self.assertEqual(response["moves_san"], ["Qh4#"])
+        mock_record_failed.assert_not_awaited()
+
     async def test_solve_prefers_stable_engine_verified_mate_candidate(self) -> None:
         from app import main
 
