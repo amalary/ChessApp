@@ -87,15 +87,41 @@ stage('Lint: Frontend') {
           set -eu
           CONTAINER_NAME="puzzle-backend-smoke-${BUILD_NUMBER}"
           REDIS_NAME="${CONTAINER_NAME}-redis"
-          NETWORK_NAME="chess-smoke-net"
-          docker rm -f "${CONTAINER_NAME}" "${REDIS_NAME}" >/dev/null 2>&1 || true
+          CURL_NAME="${CONTAINER_NAME}-curl"
+          NETWORK_NAME="chess-smoke-net-${BUILD_NUMBER}"
+          docker rm -f "${CONTAINER_NAME}" "${REDIS_NAME}" "${CURL_NAME}" >/dev/null 2>&1 || true
           docker network rm "${NETWORK_NAME}" >/dev/null 2>&1 || true
 
           cleanup() {
-            docker rm -f "${CONTAINER_NAME}" "${REDIS_NAME}" >/dev/null 2>&1 || true
+            docker rm -f "${CONTAINER_NAME}" "${REDIS_NAME}" "${CURL_NAME}" >/dev/null 2>&1 || true
             docker network rm "${NETWORK_NAME}" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
+
+          dump_backend_smoke_diagnostics() {
+            echo "Backend smoke diagnostics: docker ps -a"
+            docker ps -a || true
+
+            echo "Backend smoke diagnostics: backend logs"
+            docker logs "${CONTAINER_NAME}" || true
+
+            echo "Backend smoke diagnostics: redis logs"
+            docker logs "${REDIS_NAME}" || true
+
+            echo "Backend smoke diagnostics: backend inspect"
+            docker inspect "${CONTAINER_NAME}" || true
+
+            echo "Backend smoke diagnostics: backend listening sockets"
+            docker exec "${CONTAINER_NAME}" sh -c 'ss -ltnp || netstat -ltnp || true' || true
+
+            echo "Backend smoke diagnostics: curl -v"
+            docker rm -f "${CURL_NAME}" >/dev/null 2>&1 || true
+            docker run --rm \
+              --name "${CURL_NAME}" \
+              --network "${NETWORK_NAME}" \
+              curlimages/curl:8.10.1 \
+              -v http://backend:8080/ || true
+          }
 
           docker network create "${NETWORK_NAME}"
           docker run -d \
@@ -103,6 +129,18 @@ stage('Lint: Frontend') {
             --network "${NETWORK_NAME}" \
             --network-alias redis \
             redis:7-alpine
+
+          for i in $(seq 1 30); do
+            if docker exec "${REDIS_NAME}" redis-cli ping | grep -q PONG; then
+              break
+            fi
+            if [ "$i" = "30" ]; then
+              echo "Redis did not become ready for backend smoke test."
+              dump_backend_smoke_diagnostics
+              exit 1
+            fi
+            sleep 1
+          done
 
           docker run -d \
             --name "${CONTAINER_NAME}" \
@@ -112,24 +150,20 @@ stage('Lint: Frontend') {
             -e REDIS_URL="redis://redis:6379/0" \
             "${DOCKERHUB_USR}/puzzle-backend:latest"
 
-          smoke_curl() {
-            docker run --rm --network "${NETWORK_NAME}" curlimages/curl:8.10.1 \
-              -fsS http://backend:8080/
-          }
-
           for i in $(seq 1 30); do
-            if smoke_curl; then
+            docker rm -f "${CURL_NAME}" >/dev/null 2>&1 || true
+            if docker run --rm \
+              --name "${CURL_NAME}" \
+              --network "${NETWORK_NAME}" \
+              curlimages/curl:8.10.1 \
+              -vfsS http://backend:8080/; then
               exit 0
             fi
             sleep 1
           done
 
           echo "Backend container failed local / smoke test."
-          echo "Backend logs:"
-          docker logs "${CONTAINER_NAME}" || true
-          echo "Redis logs:"
-          docker logs "${REDIS_NAME}" || true
-          docker ps
+          dump_backend_smoke_diagnostics
           exit 1
         '''
         sh '''
