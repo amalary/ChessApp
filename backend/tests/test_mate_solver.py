@@ -6,11 +6,19 @@ from unittest.mock import MagicMock, patch
 import chess
 import chess.engine
 
-from app.services.mate_solver import EngineCrashedError, MateLine, find_mate_in_1_to_3
+from app.services.mate_solver import (
+    EngineCrashedError,
+    EngineLine,
+    MateLine,
+    find_best_engine_line,
+    find_mate_in_1_to_3,
+)
 
 
 class MateSolverTests(unittest.TestCase):
-    def _mock_engine_context(self, analyse_result=None, analyse_side_effect=None) -> MagicMock:
+    def _mock_engine_context(
+        self, analyse_result=None, analyse_side_effect=None
+    ) -> MagicMock:
         engine = MagicMock()
         if analyse_side_effect is not None:
             engine.analyse.side_effect = analyse_side_effect
@@ -27,7 +35,10 @@ class MateSolverTests(unittest.TestCase):
             "pv": [chess.Move.from_uci("e1e2")],
         }
         context = self._mock_engine_context(analyse_result=info)
-        with patch("app.services.mate_solver.chess.engine.SimpleEngine.popen_uci", return_value=context):
+        with patch(
+            "app.services.mate_solver.chess.engine.SimpleEngine.popen_uci",
+            return_value=context,
+        ):
             result = find_mate_in_1_to_3(
                 fen="4k3/8/8/8/8/8/8/4K3 w - - 0 1",
                 stockfish_path="stockfish",
@@ -43,7 +54,10 @@ class MateSolverTests(unittest.TestCase):
             "pv": [],
         }
         context = self._mock_engine_context(analyse_result=info)
-        with patch("app.services.mate_solver.chess.engine.SimpleEngine.popen_uci", return_value=context):
+        with patch(
+            "app.services.mate_solver.chess.engine.SimpleEngine.popen_uci",
+            return_value=context,
+        ):
             result = find_mate_in_1_to_3(
                 fen="4k3/8/8/8/8/8/8/4K3 w - - 0 1",
                 stockfish_path="stockfish",
@@ -55,12 +69,36 @@ class MateSolverTests(unittest.TestCase):
         context = self._mock_engine_context(
             analyse_side_effect=chess.engine.EngineError("engine crashed"),
         )
-        with patch("app.services.mate_solver.chess.engine.SimpleEngine.popen_uci", return_value=context):
+        with patch(
+            "app.services.mate_solver.chess.engine.SimpleEngine.popen_uci",
+            return_value=context,
+        ):
             with self.assertRaises(EngineCrashedError):
                 find_mate_in_1_to_3(
                     fen="4k3/8/8/8/8/8/8/4K3 w - - 0 1",
                     stockfish_path="stockfish",
                 )
+
+    def test_returns_best_engine_line_when_pv_exists(self) -> None:
+        info = {
+            "score": chess.engine.PovScore(chess.engine.Cp(32), chess.WHITE),
+            "pv": [chess.Move.from_uci("e2e4"), chess.Move.from_uci("e7e5")],
+        }
+        context = self._mock_engine_context(analyse_result=info)
+        with patch(
+            "app.services.mate_solver.chess.engine.SimpleEngine.popen_uci",
+            return_value=context,
+        ):
+            result = find_best_engine_line(
+                fen=chess.STARTING_FEN,
+                stockfish_path="stockfish",
+            )
+
+        self.assertIsInstance(result, EngineLine)
+        assert result is not None
+        self.assertIsNone(result.mate_in)
+        self.assertEqual(result.moves_uci, ["e2e4", "e7e5"])
+        self.assertEqual(result.moves_san, ["e4", "e5"])
 
 
 if __name__ == "__main__":

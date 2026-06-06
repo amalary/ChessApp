@@ -18,6 +18,13 @@ class MateLine:
     moves_san: List[str]
 
 
+@dataclass
+class EngineLine:
+    mate_in: None
+    moves_uci: List[str]
+    moves_san: List[str]
+
+
 def _pv_to_san(board: chess.Board, pv: List[chess.Move]) -> List[str]:
     b = board.copy()
     san: List[str] = []
@@ -81,3 +88,37 @@ def find_mate_in_1_to_3(
     moves_uci = [m.uci() for m in pv]
     moves_san = _pv_to_san(board, pv)
     return MateLine(mate_in=mate_in, moves_uci=moves_uci, moves_san=moves_san)
+
+
+def find_best_engine_line(
+    fen: str,
+    stockfish_path: str,
+    think_time_s: float = 1.5,
+    max_depth: int = 18,
+) -> Optional[EngineLine]:
+    """Return Stockfish's best principal variation when no short mate is found."""
+    board = chess.Board(fen)
+    if board.is_game_over():
+        return None
+
+    try:
+        with chess.engine.SimpleEngine.popen_uci(stockfish_path) as engine:
+            info = engine.analyse(
+                board,
+                chess.engine.Limit(time=think_time_s, depth=max_depth),
+                multipv=1,
+            )
+    except (chess.engine.EngineError, OSError) as exc:
+        raise EngineCrashedError(str(exc)) from exc
+
+    primary = _primary_info(info)
+    if primary is None:
+        return None
+
+    pv = primary.get("pv") or []
+    if not pv:
+        return None
+
+    moves_uci = [m.uci() for m in pv]
+    moves_san = _pv_to_san(board, pv)
+    return EngineLine(mate_in=None, moves_uci=moves_uci, moves_san=moves_san)

@@ -27,7 +27,7 @@ from app.models_auth import LocalAuthUser
 from app.routes.agent import router as agent_router
 from app.routers import assistant, auth, health, puzzles
 from app.services.gemini_fen import fen_from_image_bytes
-from app.services.mate_solver import find_mate_in_1_to_3
+from app.services.mate_solver import find_best_engine_line, find_mate_in_1_to_3
 from app.services.puzzle_submission_service import create_submission_for_user
 from app.services.puzzle_submission_service import estimate_puzzle_difficulty_rating
 from app.services.protection_service import (
@@ -336,6 +336,7 @@ def _persist_local_auth_submission(
     confidence: float,
     gemini_result: dict,
     result: object,
+    mate_found: bool,
     first_move_uci: str | None,
     time_to_first_move_seconds: float | None,
     difficulty_rating: int | None,
@@ -385,8 +386,8 @@ def _persist_local_auth_submission(
                 "sideToMove": gemini_result.get("side_to_move"),
                 "confidence": confidence,
                 "attemptsUsed": gemini_result.get("attempts_used"),
-                "mateFound": result is not None,
-                "mateIn": result.mate_in if result else None,
+                "mateFound": mate_found,
+                "mateIn": result.mate_in if mate_found and result else None,
             },
             solution_lines=result.moves_san if result else [],
             first_move_assessment=first_move_assessment,
@@ -530,8 +531,15 @@ async def solve(
             think_time_s=2.0,
             max_mate=3,
         )
+        mate_found = result is not None
+        if result is None:
+            result = find_best_engine_line(
+                fen=fen,
+                stockfish_path=stockfish_path,
+                think_time_s=1.5,
+            )
         stockfish_best_move = _extract_first_uci_move(result)
-        stockfish_mate_depth = result.mate_in if result else None
+        stockfish_mate_depth = result.mate_in if mate_found and result else None
         solve_time_ms = max(0, int(round((perf_counter() - started_at) * 1000)))
         gemini_result["side_to_move"] = "white" if chess.Board(fen).turn else "black"
         await clear_failed_solve_attempts(request)
@@ -541,8 +549,8 @@ async def solve(
             "vision_confidence": confidence,
             "vision_side_to_move": gemini_result.get("side_to_move"),
             "vision_attempts_used": gemini_result.get("attempts_used"),
-            "mate_found": result is not None,
-            "mate_in": result.mate_in if result else None,
+            "mate_found": mate_found,
+            "mate_in": result.mate_in if mate_found and result else None,
             "moves_san": result.moves_san if result else [],
             "moves_uci": result.moves_uci if result else [],
         }
@@ -563,6 +571,7 @@ async def solve(
                     confidence=confidence,
                     gemini_result=gemini_result,
                     result=result,
+                    mate_found=mate_found,
                     first_move_uci=first_move_uci,
                     time_to_first_move_seconds=time_to_first_move_seconds,
                     difficulty_rating=difficulty_rating,

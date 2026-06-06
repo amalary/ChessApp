@@ -202,6 +202,57 @@ class SolveProtectionHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["moves_uci"], ["d8h4"])
         self.assertTrue(response["mate_found"])
 
+    async def test_solve_returns_best_engine_line_when_no_short_mate(self) -> None:
+        from app import main
+
+        req = _request(path="/solve")
+        upload = protection_service.ValidatedSolveUpload(
+            data=_png_bytes(),
+            filename="board.png",
+            content_type="image/png",
+        )
+        best_line = SimpleNamespace(
+            mate_in=None,
+            moves_san=["e4", "e5"],
+            moves_uci=["e2e4", "e7e5"],
+        )
+
+        with patch(
+            "app.main.fen_from_image_bytes",
+            return_value={
+                "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1",
+                "confidence": 0.96,
+                "attempts_used": 1,
+                "raw_output": "{}",
+            },
+        ), patch(
+            "app.main._resolve_stockfish_path_or_raise", return_value="stockfish"
+        ), patch(
+            "app.main.find_mate_in_1_to_3",
+            return_value=None,
+        ), patch(
+            "app.main.find_best_engine_line",
+            return_value=best_line,
+        ), patch(
+            "app.main.get_optional_local_auth_user_from_current_user",
+            return_value=None,
+        ), patch(
+            "app.main.clear_failed_solve_attempts",
+            new_callable=AsyncMock,
+        ):
+            response = await main.solve(
+                request=req,
+                current_user={"sub": "auth0|user"},
+                upload=upload,
+                _engine_guard=None,
+                db=SimpleNamespace(),
+            )
+
+        self.assertFalse(response["mate_found"])
+        self.assertIsNone(response["mate_in"])
+        self.assertEqual(response["moves_san"], ["e4", "e5"])
+        self.assertEqual(response["moves_uci"], ["e2e4", "e7e5"])
+
 
 class GeminiHardeningTests(unittest.TestCase):
     def test_attempt_hard_cap_limits_total_attempts(self) -> None:
