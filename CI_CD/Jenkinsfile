@@ -79,93 +79,39 @@ stage('Lint: Frontend') {
       }
     }
 
+    stage('Smoke: Backend FastAPI') {
+      steps {
+        dir('backend') {
+          sh '''
+            set -eu
+            APP_PID=""
+
+            cleanup() {
+              if [ -n "${APP_PID}" ] && kill -0 "${APP_PID}" >/dev/null 2>&1; then
+                kill "${APP_PID}" >/dev/null 2>&1 || true
+                wait "${APP_PID}" >/dev/null 2>&1 || true
+              fi
+            }
+            trap cleanup EXIT
+
+            python3 -m venv .venv
+            . .venv/bin/activate
+            pip install -r requirements.txt
+
+            PORT=8080 python -m uvicorn app.main:app --host 0.0.0.0 --port 8080 &
+            APP_PID=$!
+
+            sleep 5
+            curl -fsS http://127.0.0.1:8080/
+          '''
+        }
+      }
+    }
+
     stage('Build Docker Images') {
       steps {
         sh 'docker build --build-arg BACKEND_URL="${BACKEND_BASE_URL}" --build-arg NEXT_PUBLIC_BACKEND_URL="${BACKEND_BASE_URL}" -t ${DOCKERHUB_USR}/puzzle-frontend:latest ./frontend'
         sh 'docker build --no-cache -t ${DOCKERHUB_USR}/puzzle-backend:latest ./backend'
-        sh '''
-          set -eu
-          CONTAINER_NAME="puzzle-backend-smoke-${BUILD_NUMBER}"
-          REDIS_NAME="${CONTAINER_NAME}-redis"
-          CURL_NAME="${CONTAINER_NAME}-curl"
-          NETWORK_NAME="chess-smoke-net-${BUILD_NUMBER}"
-          BACKEND_IP=""
-          docker rm -f "${CONTAINER_NAME}" "${REDIS_NAME}" "${CURL_NAME}" >/dev/null 2>&1 || true
-          docker network rm "${NETWORK_NAME}" >/dev/null 2>&1 || true
-
-          cleanup() {
-            docker rm -f "${CONTAINER_NAME}" "${REDIS_NAME}" "${CURL_NAME}" >/dev/null 2>&1 || true
-            docker network rm "${NETWORK_NAME}" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-
-          dump_backend_smoke_diagnostics() {
-            echo "Backend smoke diagnostics: docker ps -a"
-            docker ps -a || true
-
-            echo "Backend smoke diagnostics: backend logs"
-            docker logs "${CONTAINER_NAME}" || true
-
-            echo "Backend smoke diagnostics: redis logs"
-            docker logs "${REDIS_NAME}" || true
-
-            echo "Backend smoke diagnostics: backend inspect"
-            docker inspect "${CONTAINER_NAME}" || true
-
-            echo "Backend smoke diagnostics: backend listening sockets"
-            docker exec "${CONTAINER_NAME}" sh -c 'ss -ltnp || netstat -ltnp || true' || true
-
-            if [ -n "${BACKEND_IP}" ]; then
-              echo "Backend smoke diagnostics: curl -v http://${BACKEND_IP}:8080/"
-              curl -v "http://${BACKEND_IP}:8080/" || true
-            fi
-          }
-
-          docker network create "${NETWORK_NAME}"
-          docker run -d \
-            --name "${REDIS_NAME}" \
-            --network "${NETWORK_NAME}" \
-            --network-alias redis \
-            redis:7-alpine
-
-          for i in $(seq 1 30); do
-            if docker exec "${REDIS_NAME}" redis-cli ping | grep -q PONG; then
-              break
-            fi
-            if [ "$i" = "30" ]; then
-              echo "Redis did not become ready for backend smoke test."
-              dump_backend_smoke_diagnostics
-              exit 1
-            fi
-            sleep 1
-          done
-
-          docker run -d \
-            --name "${CONTAINER_NAME}" \
-            --network "${NETWORK_NAME}" \
-            --network-alias backend \
-            -e PORT=8080 \
-            -e REDIS_URL="redis://redis:6379/0" \
-            "${DOCKERHUB_USR}/puzzle-backend:latest"
-
-          BACKEND_IP=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${CONTAINER_NAME}")
-          if [ -z "${BACKEND_IP}" ]; then
-            echo "Could not determine backend container IP for smoke test."
-            dump_backend_smoke_diagnostics
-            exit 1
-          fi
-
-          for i in $(seq 1 30); do
-            if curl -fsS "http://${BACKEND_IP}:8080/"; then
-              exit 0
-            fi
-            sleep 1
-          done
-
-          echo "Backend container failed local / smoke test."
-          dump_backend_smoke_diagnostics
-          exit 1
-        '''
         sh '''
           set -eu
           if [ "${DEPLOY_TO_CLOUD_RUN}" != "true" ]; then
